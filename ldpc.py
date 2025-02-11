@@ -21,7 +21,7 @@ class LDPCEncoder():
         self.bitEnergyRatio = 0
     def encode(self, message, snr=15):
         self.SNR = snr
-        self.bitEnergyRatio = snr - 10 * math.log10(0.9) #just random guess for Rb/B
+        self.bitEnergyRatio = snr - 10 * math.log10(1) - 10 * math.log10(0.25) #just random guess for Rb/B
         self.symbolNoiseRatio = self.bitEnergyRatio  * 2
         if(len(message) != self.G.shape[1]):
             print("Invalid Message Length: G is " + str(self.G.shape[1]) + " message is " + str(len(message)))
@@ -37,7 +37,7 @@ class LDPCEncoder():
     def isValidCodeword(self, decoded_codeword):
         syndrome = numpy.dot(self.H, decoded_codeword.T) % 2
         is_valid = numpy.all(syndrome == 0)
-        #print(f"syndome {syndrome}")
+        print(f"syndome {syndrome}")
         return is_valid
     
 
@@ -47,14 +47,14 @@ class LDPCEncoder():
         bitNodeMessages = []
         #make hard decision on initial bit states
         for val in codeword:
-            if(val < 0 ):
+            if(val > 0 ):
                 bitNodes.append(0)
             else:
                 bitNodes.append(1)
         newMessages = [0] * len(bitNodeMessages)
         numIterations = 0
         print(f"initial received \n{numpy.array(bitNodes)}")
-        while numIterations < 10:
+        while numIterations < 30:
             if self.isValidCodeword(numpy.array(bitNodes)):
                 print(f"Bit flip decoding done after {numIterations} iterations")
 
@@ -104,7 +104,7 @@ class LDPCEncoder():
         symbolEnergyNoiseRatio = bitEnergyNoiseRatio * 2 # QPSK has 2 bits per symbol
 
         for index in range(len(codeword)):
-            LLR = 4 * codeword[index] * self.symbolNoiseRatio
+            LLR = 2 * codeword[index] * self.symbolNoiseRatio
             initialLLRs.append(LLR)
       
         # Initialize check-to-bit messages
@@ -119,8 +119,7 @@ class LDPCEncoder():
         BER = 0
         errors = 0
         while numIterations < 30:
-
-           
+        
             if self.isValidCodeword(numpy.array(hardDecisions)):
                 print(f"Min Sum Decoding done after {numIterations} Iterations")
                 print(f"Iteration {numIterations}: Hard {hardDecisions} \n Original {self.originalEncoded}")
@@ -159,7 +158,7 @@ class LDPCEncoder():
                 messageSign = 1
                 for target in Ej:
                     excludeTarget = numpy.setdiff1d(Ej, target)  # Exclude target bit
-                    minLLR = numpy.min(bitNodes[excludeTarget])
+                    minLLR = numpy.min(bitNodes[excludeTarget]) * 0.75
                     messageSign = numpy.prod(numpy.sign(bitNodes[excludeTarget]))  
                     message = minLLR * messageSign
                     messagesReceivedByBits[target] += message
@@ -170,7 +169,7 @@ class LDPCEncoder():
                 # if messagesReceivedByBits[i] + initialLLRs[i] < 0:
                 #     bitNodes[i]  = 1
                 # else: bitNodes[i] = 0
-                bitNodes[i] = numpy.clip(0.5 * (messagesReceivedByBits[i] + initialLLRs[i]),500,-500)
+                bitNodes[i] =  0.75 * (messagesReceivedByBits[i] + initialLLRs[i])
                 
                
                 bitValsTest.append(bitNodes[i])
@@ -189,8 +188,10 @@ class LDPCEncoder():
         if errors != 0:
             errors = numpy.sum(numpy.array(self.originalEncoded) != numpy.array(hardDecisions))
         BER = errors/len(bitNodes) 
-        
+        print(f"Bitnodes{bitNodes}\n")
+        print(f"Original{self.originalEncoded}\n")
         print(f"BER: {BER}, SNR {self.SNR}, Eb/No {self.bitEnergyRatio}")
+        self.write("results.txt", BER,self.bitEnergyRatio )
         return BER
     
     # def minSumDecode(self, codeword):
@@ -281,7 +282,9 @@ class LDPCEncoder():
     #     print(f"BER: {BER}")
     #     return BER
 
-                
+    def write(self, filePath, BER, bitEnergyRatio):
+        with open(filePath, "a") as file:
+            file.write(f"BER = {BER}, SNR={self.SNR}, Eb/N0={bitEnergyRatio}\n")
 
 
     
@@ -293,8 +296,8 @@ class LDPCEncoder():
 test0 = LDPCEncoder(3,15, 60)
 message0 = [1,0,1,1,1,0,1,1,1,1,0,1,1,0,0,1,1,1,0,1,1,1,0,1,1,1,1,0,1,1,0,0,1,1,1,0,1,1,1,0,1,1,1,1,0,1,1,0,0,1]
 
-""""n=200, r = 1/2"""
-test1 = LDPCEncoder(15,20, 100)
+""""n=200, r = 1/4"""
+test1 = LDPCEncoder(15,20, 400)
 message1 = numpy.random.randint(0, 2, size=87).tolist()  
 
 
@@ -320,17 +323,17 @@ BEROut = []
 ratios = [ ]
 for snr in snrRange:
     avgBER = 0
-    for it in range(10):
-        message1 = numpy.random.randint(0, 2, size=39).tolist()  
+    for it in range(3):
+        message1 = numpy.random.randint(0, 2, size=114).tolist()  
         noisyCodeword = test1.encode(message1, snr) #snr = 15
         BER = test1.minSumDecode(noisyCodeword)
         avgBER += BER
-        if BER == 0:
-            break
+        # if BER == 0:
+        #     break
         
     BEROut.append(avgBER/10)
     print(f"Average BER:{avgBER/10}, SNR{snr}")
-BEROut = [ber if ber > 0 else 1e-5 for ber in BEROut]
+
 plt.figure(figsize=(8, 5))
 plt.semilogy(snrRange, BEROut, marker='o', linestyle='-')  
 plt.xlabel("SNR (dB)")
