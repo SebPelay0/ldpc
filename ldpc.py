@@ -265,8 +265,8 @@ class LDPCEncoder():
 
 
 """SHORT MESSAGE 1/3 CODE RATE"""
-test0 = LDPCEncoder(75,100, 200)
-message0 = numpy.random.randint(0, 2, size=124).tolist()  
+test0 = LDPCEncoder(3,4, 1000)
+message0 = numpy.random.randint(0, 2, size=252).tolist()  
 """"n=200, r = 1/4"""
 test1 = LDPCEncoder(30,50, 300)
 message1 = numpy.random.randint(0, 2, size=87).tolist()  
@@ -289,31 +289,48 @@ message3 = numpy.random.randint(0, 2, size=374).tolist()
 # noisyCodeword = test3.encode(message3, 9) #snr = 15
 # BER = test3.minSumDecode(noisyCodeword)
 
+test0.encode(message0) 
+noisyCodeword = test0.addNoiseBPSK(-2, True)
+print(test0.minSumDecode(noisyCodeword))
+
 
 def plot():
-    snrRange = range(15)
+    snrRange = range(-4,8)
     BEROut = []
     ratios = [ ]
+    totalFrameErrors = []
     for snr in snrRange:
         avgBER = 0
+        frameErrors = 0
         for it in range(3):
-            message0 = numpy.random.randint(0, 2, size=124).tolist()  
+            message0 = numpy.random.randint(0, 2, size=252).tolist()  
             test0.encode(message0) 
             noisyCodeword = test0.addNoiseBPSK(snr)
             BER = test0.minSumDecode(noisyCodeword)
+            if BER > 0:
+                frameErrors +=1
             avgBER += BER
             # if BER == 0:
             #     break
             
         BEROut.append(avgBER/3)
-        test0.write("results.txt", avgBER/10, test0.bitEnergyRatio)
-        print(f"Average BER:{avgBER/10}, SNR{snr}")
+        totalFrameErrors.append(frameErrors/3)
+        test0.write("results.txt", avgBER/3, test0.bitEnergyRatio)
+        print(f"Average BER:{avgBER/3}, SNR{snr}")
 
     plt.figure(figsize=(8, 5))
     plt.semilogy(snrRange, BEROut, marker='o', linestyle='-')  
     plt.xlabel("SNR (dB)")
     plt.ylabel("BER (Bit Error Rate)")
-    plt.title("LDPC Min-Sum Decoding: BER vs. SNR at 1/4 Data Rate, k = 124")
+    plt.title("LDPC Min-Sum Decoding: BER vs. SNR at 1/4 Data Rate, k = 1000, BPSK")
+    plt.grid(True, which="both", linestyle="--")
+    plt.show()
+
+    plt.figure(figsize=(8, 5))
+    plt.semilogy(snrRange, totalFrameErrors, marker='o', linestyle='-')  
+    plt.xlabel("SNR (dB)")
+    plt.ylabel("Frame Error Rate")
+    plt.title("LDPC Min-Sum Decoding: Frame Error vs. SNR at 1/4 Data Rate, k = 1000, BPSK")
     plt.grid(True, which="both", linestyle="--")
     plt.show()
 
@@ -326,110 +343,6 @@ def plot():
 
 
 
-plot()
 
+# plot()
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-    # def minSumDecode(self, codeword):
-    #     print(f"\nH matrix: \n{self.H}")
-    
-    #     bitNodes = numpy.array(codeword, dtype=float)  # Use LLRs instead of hard bits]
-        
-    #     initialLLRs = []
-    #     numIterations = 0
-    #     bitEnergyNoiseRatio = self.SNR/2
-    #     symbolEnergyNoiseRatio = bitEnergyNoiseRatio * 2 # QPSK has 2 bits per symbol
-
-    #     print(f"Initial received \n{bitNodes}")
-    #     for index in range(len(codeword)):
-    #         #SNR = 10log(1 / variance) 
-    #         LLR = 4 * codeword[index] * symbolEnergyNoiseRatio
-    #         initialLLRs.append(LLR)
-
-    #     # Initialize check-to-bit messages
-    #     print(f"Initial bitNodes {bitNodes} initialLLRS {initialLLRs}")
-    #     hardDecisions = [0] * len(bitNodes)
-    #     BER = 0
-    #     while numIterations < 30:
-    #         if self.isValidCodeword(bitNodes):
-    #             print(f"Min Sum Decoding done after {numIterations} Iterations")
-                
-    #             for i in range(len(bitNodes)):
-    #                 if bitNodes[i] > 0:
-    #                     bitNodes[i] = 0
-    #                 else: bitNodes[i] = 1
-    #             print(f"Iteration {numIterations}: Bit nodes{bitNodes} \n Original {self.originalEncoded}")
-                
-    #             break
-
-    #         if numIterations > 2:
-    #             if self.isValidCodeword(numpy.array(hardDecisions)):
-    #                 print(f"Min Sum Decoding done after {numIterations} Iterations")
-    #                 print(f"Iteration {numIterations}: Hard {hardDecisions} \n Original {self.originalEncoded}")
-    #                 print(bitNodes)
-                    
-    #                 break
-    #         # if self.isValidCodeword((bitNodes < 0).astype(int)):  # Hard decision on LLRs
-    #         #     print(bitNodes)
-    #         #     print(f"Decoding done {(bitNodes < 0).astype(int)}")
-    #         #     break
-    #         messagesReceivedByBits = [0] * len(bitNodes)
-    #         previousBitNodes = bitNodes.copy()
-
-    
-    #         for j in range(int(self.m)):  
-    #             Ej = numpy.where(self.H[j] == 1)[0]  # Get bit indices connected to check node j
-                
-    #             if len(Ej) < 2:
-    #                 continue  # Skip if not enough connections
-
-    #             # Compute sign product and minimum  LLR excluding target
-    #             messageSign = 1
-    #             for target in Ej:
-    #                 excludeTarget = numpy.setdiff1d(Ej, target)  # Exclude target bit
-    #                 minLLR = numpy.min(bitNodes[excludeTarget])
-    #                 messageSign = numpy.prod(numpy.sign(bitNodes[excludeTarget]))  
-    #                 message = minLLR * messageSign
-    #                 messagesReceivedByBits[target] += message
-                    
-        
-    #         bitValsTest = []
-    #         for i in range(len(bitNodes)):
-    #             # if messagesReceivedByBits[i] + initialLLRs[i] < 0:
-    #             #     bitNodes[i]  = 1
-    #             # else: bitNodes[i] = 0
-    #             bitNodes[i] = messagesReceivedByBits[i] + initialLLRs[i]
-               
-    #             bitValsTest.append(bitNodes[i])
-
-    #         for i in range(len(bitNodes)):
-    #             if bitNodes[i] > 0:
-    #                 hardDecisions[i] = 0
-    #             else: hardDecisions[i] = 1
-    #         # if numpy.array_equal(previousBitNodes, bitNodes):  # Stop if LLRs converge
-    #         #     print("No changes, stopping early.")
-    #         #     break
-
-    #         numIterations += 1
-        
-    #     errors = numpy.sum(numpy.array(self.originalEncoded) != numpy.array(bitNodes))
-    #     BER = errors/len(bitNodes) 
-        
-    #     print(f"BER: {BER}")
-    #     return BER
