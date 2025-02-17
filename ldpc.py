@@ -21,6 +21,7 @@ class LDPCEncoder():
         self.SNR = 0
         self.bitEnergyRatio = 0
         self.numIterations = 0
+        self.messageDecoded = 0
     def encode(self, message):
       
         if(len(message) != self.G.shape[1]):
@@ -103,9 +104,6 @@ class LDPCEncoder():
         
         initialLLRs = []
         numIterations = 0
-        bitEnergyNoiseRatio = self.SNR/2
-        symbolEnergyNoiseRatio = bitEnergyNoiseRatio * 2 # QPSK has 2 bits per symbol
-
         for index in range(len(codeword)):
             sigma2 = 1 / (2 * (10**(self.SNR / 10))) 
             LLR = (2 * codeword[index]) / sigma2
@@ -129,9 +127,10 @@ class LDPCEncoder():
                 print(f"Iteration {numIterations}: Hard {hardDecisions} \n Original {self.originalEncoded}")
                 hardDecode = True
                 errors = numpy.sum(numpy.array(self.originalEncoded) != numpy.array(hardDecisions))
-              
+                self.messageDecoded = pyldpc.get_message(self.G, hardDecisions)
+                print(f"Here {pyldpc.get_message(self.G, hardDecisions)}")
                 return errors/len(bitNodes)
-
+       
             elif self.isValidCodeword(bitNodes):
                 print(f"Min Sum Decoding done after {numIterations} Iterations")
                 print(f"Soft Bit nodes {bitNodes}")
@@ -142,6 +141,7 @@ class LDPCEncoder():
                     else: bitNodes[i] = 1
                 print(f"Iteration {numIterations}: Bit nodes{bitNodes} \n Original {self.originalEncoded}")
                 errors = numpy.sum(numpy.array(self.originalEncoded) != numpy.array(bitNodes))
+                self.messageDecoded = pyldpc.get_message(self.G, bitNodes)
                 
                 return errors/len(bitNodes)
                 
@@ -169,7 +169,7 @@ class LDPCEncoder():
                     minLLR = numpy.min(numpy.abs(bitNodes[excludeTarget]))
                     messageSign = numpy.prod(numpy.sign(bitNodes[excludeTarget]))  
                     message = minLLR * messageSign
-                    messagesReceivedByBits[target] += message
+                    messagesReceivedByBits[target] +=( 0.75* message)
                     
         
             bitValsTest = []
@@ -177,7 +177,7 @@ class LDPCEncoder():
                 # if messagesReceivedByBits[i] + initialLLRs[i] < 0:
                 #     bitNodes[i]  = 1
                 # else: bitNodes[i] = 0
-                bitNodes[i] =  0.75 * (messagesReceivedByBits[i] + initialLLRs[i])
+                bitNodes[i] = (messagesReceivedByBits[i] + initialLLRs[i])
                 
                
         
@@ -195,19 +195,24 @@ class LDPCEncoder():
         
         errors = numpy.sum(numpy.array(self.originalEncoded) != numpy.array(hardDecisions))
         BER = errors/len(bitNodes) 
+        for i in range(len(bitNodes)):   
+            if bitNodes[i] < 0:
+                bitNodes[i] = 0
+            else: bitNodes[i] = 1
+        self.messageDecoded = pyldpc.get_message(self.G, bitNodes)
         print(f"Bitnodes{bitNodes}\n")
         print(f"Original{self.originalEncoded}\n")
         print(f"Decoding Failed, Best Guess - BER: {BER}, SNR {self.SNR}, Eb/No {self.bitEnergyRatio}")
         return BER
 
     def addNoiseBPSK(self, SNR_DB, plot=False):
-        print(f"Original encoded message {self.originalEncoded}")
+        # print(f"Original encoded message {self.originalEncoded}")
         power = sum([a**2 for a in self.originalEncoded]) / len(self.originalEncoded) #E_b, for BPSK #E_b == E_s
         
         SNRLinear = 10**(SNR_DB/10)
-        noiseStd = numpy.sqrt(1 / SNRLinear)
+        noiseStd = numpy.sqrt(1 / (2*SNRLinear))
         noise = noiseStd * numpy.random.randn(len(self.originalEncoded))
-        print(f"Noise={noise}")
+        # print(f"Noise={noise}")
         bpsk = 2 * numpy.array(self.originalEncoded) - 1  # Convert to -1 and 1
 
     
@@ -233,7 +238,7 @@ class LDPCEncoder():
         power = sum([a**2 for a in complexSignal]) / len(complexSignal) #E_b, for BPSK #E_b == E_s
         
         #Maybe remove 1/2 in sqrt?
-        noise = numpy.sqrt(power / (2 * SNRLinear)) * (numpy.random.randn(len(complexSignal)) + 1j *(numpy.random.randn(len(complexSignal))))
+        noise = numpy.sqrt(power / (2*SNRLinear)) * (numpy.random.randn(len(complexSignal)) + 1j *(numpy.random.randn(len(complexSignal))))
         y = complexSignal + noise
         print(y)
         plt.figure(figsize=(7, 7))
@@ -256,20 +261,38 @@ class LDPCEncoder():
         randomSignal = numpy.random.choice(QPSKSymbols, size=length)
         return randomSignal
     
-    def write(self, filePath, BER, bitEnergyRatio):
+    def write(self, filePath, BER, frame):
         with open(filePath, "a") as file:
-            file.write(f"{time.ctime()}: BER = {BER}, SNR={self.SNR}, Eb/N0={bitEnergyRatio}\n")
+            file.write(f"{time.ctime()}: BER = {BER}, SNR={self.SNR}, frameErrors{frame}\n")
 
 
-#numpy.random.seed(42)       
+
+
+
+def readMatrix(filePath):
+    with open(filePath, "r") as file:
+        lines = file.readlines()
+
+    rows = []
+    for line in lines:
+        row = list(map(int, line.strip())) #convert each char to int
+        rows.append(row)
+        
+    H = numpy.array(rows)
+    G = pyldpc.coding_matrix(H, True)
+    
+  
+    return H,G
+
+# numpy.random.seed(42)       
 
 
 """SHORT MESSAGE 1/3 CODE RATE"""
-test0 = LDPCEncoder(3,4, 1000)
-message0 = numpy.random.randint(0, 2, size=252).tolist()  
+test0 = LDPCEncoder(2,4, 256)
+message0 = numpy.random.randint(0, 2, size=129).tolist()  
 """"n=200, r = 1/4"""
-test1 = LDPCEncoder(30,50, 300)
-message1 = numpy.random.randint(0, 2, size=87).tolist()  
+test1 = LDPCEncoder(5,6, 648)
+message1 = numpy.random.randint(0, 2, size=325).tolist()  
 
 
 """"n=600, r = 1/4"""
@@ -278,8 +301,8 @@ message2 = numpy.random.randint(0, 2, size=519).tolist()
 
 
 """"n=600, r = 1/4"""
-test3 = LDPCEncoder(225,300, 600)
-message3 = numpy.random.randint(0, 2, size=374).tolist()  
+test3 = LDPCEncoder(2,4, 8)
+message3 = numpy.random.randint(0, 2, size=5).tolist()  
 
 # test0.encode(message0)
 # noisyCodeword = test0.addNoiseBPSK(1, True)
@@ -288,61 +311,108 @@ message3 = numpy.random.randint(0, 2, size=374).tolist()
 # message2 = numpy.random.randint(0, 2, size=519).tolist()  
 # noisyCodeword = test3.encode(message3, 9) #snr = 15
 # BER = test3.minSumDecode(noisyCodeword)
-
+print(f"Message original {message0}")
 test0.encode(message0) 
-noisyCodeword = test0.addNoiseBPSK(-2, True)
-print(test0.minSumDecode(noisyCodeword))
+noisyCodeword = test0.addNoiseBPSK(2, False)
+print(test0.bitFlipDecode(noisyCodeword))
 
+print(f"Decoded {test0.messageDecoded}")
+# print("HERE")
+# print(test1.minSumDecode(noisyCodeword))
+# print("HERE1") #0.11574074074074074
+# sumProdEncode = pyldpc.encode(test0.G, message0, -2)
+# sumProdDecode = pyldpc.decode(test0.H, sumProdEncode, -2, 30)
+# sumProdMessage = pyldpc.get_message(test0.G, sumProdDecode)
+# sumProdErrors = numpy.sum(numpy.array(message0) != numpy.array(sumProdMessage))
+# sumProdBER = sumProdErrors/len(message0)     
+# print(f"Message {message0}")
+# print(f"SumProdMessage{sumProdMessage}")
+# print(f"BER{sumProdBER} , length{len(message0)}")
+
+
+def writeData(filePath, BER, frameError):
+    
+    with open(filePath, "a") as file:
+        string ="BER Values: ["
+        string += ", ".join(str(e) for e in BER) 
+        string += "]\n"
+
+        frames = "Frame errors: ["
+        frames += ", ".join(str(e) for e in frameError) 
+        frames += "]\n"
 
 def plot():
-    snrRange = range(-4,8)
+    snrRange = numpy.arange(-6, 1, 1)
     BEROut = []
-    ratios = [ ]
+    
     totalFrameErrors = []
+    sumProdBEROut = []
+    n = 10
     for snr in snrRange:
         avgBER = 0
+        avgSumProdBER = 0
         frameErrors = 0
-        for it in range(3):
-            message0 = numpy.random.randint(0, 2, size=252).tolist()  
-            test0.encode(message0) 
-            noisyCodeword = test0.addNoiseBPSK(snr)
-            BER = test0.minSumDecode(noisyCodeword)
+        for it in range(n):
+            message1 = numpy.random.randint(0, 2, size=112).tolist()  
+            test1.encode(message1) 
+            noisyCodeword = test1.addNoiseBPSK(snr)
+            BER = test1.minSumDecode(noisyCodeword)
+            # sumProdEncode = pyldpc.encode(test1.G, message1, snr)
+            # sumProdDecode = pyldpc.decode(test1.H, sumProdEncode, 10, 50) #maybe change this to use var snr
+            # sumProdMessage = pyldpc.get_message(test1.G, sumProdDecode)
+            # sumProdErrors = numpy.sum(numpy.array(message1) != numpy.array(sumProdMessage))
+            # sumProdBER = sumProdErrors/len(sumProdMessage)  
             if BER > 0:
                 frameErrors +=1
             avgBER += BER
+            avgSumProdBER += 0
             # if BER == 0:
             #     break
             
-        BEROut.append(avgBER/3)
-        totalFrameErrors.append(frameErrors/3)
-        test0.write("results.txt", avgBER/3, test0.bitEnergyRatio)
-        print(f"Average BER:{avgBER/3}, SNR{snr}")
+        BEROut.append(avgBER/n)
+        sumProdBEROut.append(avgSumProdBER/n)
+        totalFrameErrors.append(frameErrors/n)
+        test1.write("results2.txt", avgBER/n, frameErrors/n)
+        print(f"Average BER:{avgBER/n}, SNR{snr}")
 
+    writeData("data.txt", BEROut, totalFrameErrors)
+   
     plt.figure(figsize=(8, 5))
-    plt.semilogy(snrRange, BEROut, marker='o', linestyle='-')  
-    plt.xlabel("SNR (dB)")
-    plt.ylabel("BER (Bit Error Rate)")
-    plt.title("LDPC Min-Sum Decoding: BER vs. SNR at 1/4 Data Rate, k = 1000, BPSK")
-    plt.grid(True, which="both", linestyle="--")
-    plt.show()
+    plt.yscale("log")  # Set the Y-axis to logarithmic scale
 
+    plt.plot(snrRange, BEROut, 'r.-', label="Min-Sum Decoding")
+
+   
+    #plt.plot(snrRange, sumProdBEROut, 'bo-', linestyle='-', label="Sum-Product Decoding")
+
+   
+    plt.xlabel("SNR (dB)")
+    plt.ylabel("Bit Error Rate (BER)")
+    plt.title("LDPC Decoding: BER vs. SNR at 1/6 Data Rate (n=648, BPSK)")
+
+    plt.grid(True, which="both", linestyle="--", alpha=0.6)
+    plt.legend()
+
+    plt.show()
     plt.figure(figsize=(8, 5))
     plt.semilogy(snrRange, totalFrameErrors, marker='o', linestyle='-')  
     plt.xlabel("SNR (dB)")
     plt.ylabel("Frame Error Rate")
-    plt.title("LDPC Min-Sum Decoding: Frame Error vs. SNR at 1/4 Data Rate, k = 1000, BPSK")
+    plt.title("LDPC Min-Sum Decoding: Frame Error vs. SNR at 1/6 Data Rate, n= 648, BPSK")
     plt.grid(True, which="both", linestyle="--")
     plt.show()
 
-
-    # Noise values from different vector
-    # Noise relation to SNR
+    
 
 
-
+  
 
 
 
 
+
+
+
+# test0.H, test0.G = readMatrix("parityMatrix.txt")
 # plot()
 
