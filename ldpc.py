@@ -5,14 +5,22 @@ import keyboard
 import math
 import time
 H,G = pyldpc.make_ldpc(8,2, 4,True,True)
-
+FRAME_ERROR = None
 class LDPCEncoder():
-    def __init__(self, d_v, d_c, n, seed = 20):
+    def __init__(self, d_v, d_c, n, seed = 20, readDataMatrix = False):
         self.d_v = d_v # number of times each message bit appears in a parity equation 
         self.d_c = d_c # num bits checked in a parity equation // code rate => 1 -(d_v/d_c)
         self.n = n
         self.seed = seed
-        H,G = pyldpc.make_ldpc(n,d_v, d_c,True,True, seed)
+        if False:
+            H,G = readMatrix("parityMatrix.txt")
+            
+            print(f"DV: {dv_distribution}, DC: {dc_distribution}")
+        else:
+            H,G = pyldpc.make_ldpc(n,d_v, d_c,True,True, seed)
+            dv_distribution = np.sum(H, axis=0)  # Sum along columns (variable node degrees)
+            dc_distribution = np.sum(G, axis=1)
+            #print(f"DV: {dv_distribution}, DC: {dc_distribution}")
         self.H = H
         self.G = G
         self.y = 1
@@ -22,6 +30,7 @@ class LDPCEncoder():
         self.bitEnergyRatio = 0
         self.numIterations = 0
         self.messageDecoded = 0
+
     def encode(self, message):
       
         if(len(message) != self.G.shape[1]):
@@ -34,7 +43,7 @@ class LDPCEncoder():
     def isValidCodeword(self, decoded_codeword):
         syndrome = numpy.dot(self.H, decoded_codeword.T) % 2
         is_valid = numpy.all(syndrome == 0)
-        print(f"syndome {syndrome}")
+       # print(f"syndome {syndrome}")
         return is_valid
     
 
@@ -55,8 +64,8 @@ class LDPCEncoder():
         while numIterations < 10:
             if self.isValidCodeword(numpy.array(bitNodes)):
                 errors = numpy.sum(numpy.array(self.originalEncoded) != numpy.array(bitNodes))
-                print(f"BER {errors/len(bitNodes)}")
-                print(f"Decoded {bitNodes}")
+                # print(f"BER {errors/len(bitNodes)}")
+                # print(f"Decoded {bitNodes}")
                 print(f"Bit flip decoding done after {numIterations} iterations")
                 return errors/len(bitNodes)
 
@@ -213,7 +222,10 @@ class LDPCEncoder():
         power = sum([a**2 for a in self.originalEncoded]) / len(self.originalEncoded) #E_b, for BPSK #E_b == E_s
         
         SNRLinear = 10**(SNR_DB/10)
-        noiseStd = numpy.sqrt(1 / (2*SNRLinear))
+        R_c = 1/2
+        Eb_No = SNRLinear * R_c  # Divide by R_c instead of multiplying
+        noiseStd = numpy.sqrt(1 / (2 * Eb_No))
+        # noiseStd = numpy.sqrt(1 / (2*SNRLinear))
         noise = noiseStd * numpy.random.randn(len(self.originalEncoded))
         # print(f"Noise={noise}")
         bpsk = 2 * numpy.array(self.originalEncoded) - 1  # Convert to -1 and 1
@@ -235,6 +247,7 @@ class LDPCEncoder():
             plt.grid(True)
             plt.show()
         return y
+
 
     def addNoiseQPSK(self, complexSignal, SNR_DB):
         SNRLinear = 10**(SNR_DB/10)
@@ -272,24 +285,28 @@ class LDPCEncoder():
 
 
 
+import numpy as np
+import pyldpc
+
 def readMatrix(filePath):
     with open(filePath, "r") as file:
         lines = file.readlines()
+    rows = [list(map(int, line.strip())) for line in lines]
 
-    rows = []
-    for line in lines:
-        row = list(map(int, line.strip())) #convert each char to int
-        rows.append(row)
-        
-    H = numpy.array(rows)
-    G = pyldpc.coding_matrix(H, True)
+    # Convert to NumPy array
+    H = np.array(rows, dtype=int)
+    print(H.shape)
+    # Generate generator matrix G
+    G = pyldpc.coding_matrix(H, False)
+
+    # Save G matrix
     with open("gMatrix.txt", "a") as file:
-        file.write(f"G: {G}")
+        file.write(f"G: {G}\n")
 
+    return H, G  # Return both matrices
 
     
   
-    return H,G
 
 # numpy.random.seed(42)       
 
@@ -300,8 +317,9 @@ message0 = numpy.random.randint(0, 2, size=541).tolist()
 
 
 """"RATE 3/4"""
-test1 = LDPCEncoder(2,8, 648)
-message1 = numpy.random.randint(0, 2, size=487).tolist()  
+test1 = LDPCEncoder(2,4, 648)
+
+message1 = numpy.random.randint(0, 2, size=324).tolist()  
 
 
 """"RATE 1/2"""
@@ -313,9 +331,11 @@ message2 = numpy.random.randint(0, 2, size=519).tolist()
 test3 = LDPCEncoder(3,4, 648)
 message3 = numpy.random.randint(0, 2, size=5).tolist()  
 
-# test0.encode(message0)
-# noisyCodeword = test0.addNoiseBPSK(1, True)
-# print(test0.minSumDecode(noisyCodeword))
+
+# test1.H, test1.G = readMatrix("parityMatrix.txt")
+# test1.encode(message1)
+# noisyCodeword = test1.addNoiseBPSK(1, False)
+# print(test1.minSumDecode(noisyCodeword))
 
 # message2 = numpy.random.randint(0, 2, size=519).tolist()  
 # noisyCodeword = test3.encode(message3, 9) #snr = 15
@@ -351,7 +371,7 @@ def writeData(filePath, BER, frameError):
         frames += "]\n"
     
 
-def plot():
+def plot(minSum=True, sumProd=False, bitFlip=False, readMatrixFile=False):
     snrRange = numpy.arange(-4, 4, 1)
     BEROut = []
     
@@ -365,20 +385,31 @@ def plot():
         avgBitFlipBER = 0
         frameErrors = 0
         for it in range(n):
-            message1 = numpy.random.randint(0, 2, size=325).tolist()  
-            test1.encode(message1) 
-            noisyCodeword = test1.addNoiseBPSK(snr)
-            # BER = test0.bitFlipDecode(noisyCodeword)
-            BER = test1.minSumDecode(noisyCodeword)
+            sumProdBER = 0
+            BER = 0
+            bitFlipBER = 0
+
+            if readMatrixFile:
+                test1.H, test1.G = readMatrix("parityMatrix.txt")
+            if minSum:
+                message1 = numpy.random.randint(0, 2, size=325).tolist()  
+                test1.encode(message1) 
+                noisyCodeword = test1.addNoiseBPSK(snr)
+                # BER = test0.bitFlipDecode(noisyCodeword)
+                BER = test1.minSumDecode(noisyCodeword)
             
+            if sumProd:
+                sumProdEncode = pyldpc.encode(test1.G, message1, snr)
+                sumProdDecode = pyldpc.decode(test1.H, sumProdEncode, snr, 30) #maybe change this to use var snr
+                sumProdMessage = pyldpc.get_message(test1.G, sumProdDecode)
+                sumProdErrors = numpy.sum(numpy.array(message1) != numpy.array(sumProdMessage))
+                sumProdBER = sumProdErrors/len(sumProdMessage)  
 
-            sumProdEncode = pyldpc.encode(test1.G, message1, snr)
-            sumProdDecode = pyldpc.decode(test1.H, sumProdEncode, snr, 30) #maybe change this to use var snr
-            sumProdMessage = pyldpc.get_message(test1.G, sumProdDecode)
-            sumProdErrors = numpy.sum(numpy.array(message1) != numpy.array(sumProdMessage))
-            sumProdBER = sumProdErrors/len(sumProdMessage)  
-
-            bitFlipBER = 1 - test1.bitFlipDecode(noisyCodeword)
+            if bitFlip:
+                message1 = numpy.random.randint(0, 2, size=325).tolist()  
+                test1.encode(message1) 
+                noisyCodeword = test1.addNoiseBPSK(snr)
+                bitFlipBER = 1 - test1.bitFlipDecode(noisyCodeword)
             
             if BER > 0:
                 frameErrors +=1
@@ -487,14 +518,47 @@ def plotRates():
     plt.show()
 
 
+def plotFrameError(minSum=True, sumProd=False, bitFlip=False, readMatrixFile=False):
+    snrRange = numpy.arange(-4, 4, 1)
+    BEROut = []
+    
+    totalFrameErrors = []
+    sumProdBEROut = []
+    bitFlipBEROut = []
+    maxErrors = 10
+    for snr in snrRange:
+        avgBER = 0
+        avgSumProdBER = 0
+        avgBitFlipBER = 0
+        frameErrors = 0
+        iterations = 0
+        while frameErrors < maxErrors:
+            print(f"Iteration No. {iterations}, SNR: {snr}, Frame Errors: {frameErrors}")
+            iterations += 1
+            message1 = numpy.random.randint(0, 2, size=325).tolist()  
+            test1.encode(message1)
+            BER = test1.minSumDecode(test1.addNoiseBPSK(snr))
+            if BER is FRAME_ERROR:
+                frameErrors += 1
+            if iterations > 1000:
+                frameErrors = 0
+                break
+        
+        totalFrameErrors.append(frameErrors/iterations)
+
+
+        # test1.write("results2.txt", snr, avgBER/n, avgSumProdBER/5.5,avgBitFlipBER/n )
+    plt.figure(figsize=(8, 5))
+    plt.semilogy(snrRange, totalFrameErrors, marker='o', linestyle='-')  
+    plt.xlabel("SNR (dB)")
+    plt.ylabel("Frame Error Rate")
+    plt.title("LDPC Bit-Flip Decoding: Frame Error vs. SNR at 1/4 Data Rate, n= 256, BPSK")
+    plt.grid(True, which="both", linestyle="--")
+    plt.show()
 # plotRates()
   
 
 
-
-
-
-
-
+plot()
 # test0.H, test0.G = readMatrix("parityMatrix.txt")
 
