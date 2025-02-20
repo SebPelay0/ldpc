@@ -119,21 +119,21 @@ class LDPCEncoder():
             initialLLRs.append(LLR)
       
         # Initialize check-to-bit messages
-        print(f"initialLLRS {initialLLRs} \n Original {self.originalEncoded}")
+        # print(f"initialLLRS {initialLLRs} \n Original {self.originalEncoded}")
 
         hardDecisions = [0] * len(bitNodes)
         for i in range(len(bitNodes)):
             if initialLLRs[i] < 0:
                 hardDecisions[i] = 0
             else: hardDecisions[i] = 1
-        print(f"Hard {hardDecisions}")
+        # print(f"Hard {hardDecisions}")
         BER = 0
         errors = 0
         while numIterations < 30:
             self.numIterations = numIterations
             if self.isValidCodeword(numpy.array(hardDecisions)):
                 print(f"Min Sum Decoding done after {numIterations} Iterations")
-                print(f"Iteration {numIterations}: Hard {hardDecisions} \n Original {self.originalEncoded}")
+                # print(f"Iteration {numIterations}: Hard {hardDecisions} \n Original {self.originalEncoded}")
                 hardDecode = True
                 errors = numpy.sum(numpy.array(self.originalEncoded) != numpy.array(hardDecisions))
                 self.messageDecoded = hardDecisions
@@ -141,13 +141,13 @@ class LDPCEncoder():
 
             elif self.isValidCodeword(bitNodes):
                 print(f"Min Sum Decoding done after {numIterations} Iterations")
-                print(f"Soft Bit nodes {bitNodes}")
+                # print(f"Soft Bit nodes {bitNodes}")
                 for i in range(len(bitNodes)):
                     
                     if bitNodes[i] <  0:
                         bitNodes[i] = 0
                     else: bitNodes[i] = 1
-                print(f"Iteration {numIterations}: Bit nodes{bitNodes} \n Original {self.originalEncoded}")
+                # print(f"Iteration {numIterations}: Bit nodes{bitNodes} \n Original {self.originalEncoded}")
                 errors = numpy.sum(numpy.array(self.originalEncoded) != numpy.array(bitNodes))
                 self.messageDecoded = bitNodes
                 return errors/len(bitNodes)
@@ -202,30 +202,18 @@ class LDPCEncoder():
         
         errors = numpy.sum(numpy.array(self.originalEncoded) != numpy.array(hardDecisions))
         BER = errors/len(bitNodes) 
-        print(f"Bitnodes{bitNodes}\n")
-        print(f"Original{self.originalEncoded}\n")
+        # print(f"Bitnodes{bitNodes}\n")
+        # print(f"Original{self.originalEncoded}\n")
         print(f"Decoding Failed, Best Guess - BER: {BER}, SNR {self.SNR}, Eb/No {self.bitEnergyRatio}")
         self.messageDecoded = bitNodes
-        return BER
+        return FRAME_ERROR
 
-    def raw(self, codeword):
-        hardDecisions = []
-        for val in codeword:
-            if(val < 0 ):
-                hardDecisions.append(0)
-            else:
-                hardDecisions.append(1)
-        errors = numpy.sum(numpy.array(self.originalEncoded) != numpy.array(hardDecisions))
-        return errors/len(codeword)
     def addNoiseBPSK(self, SNR_DB, plot=False):
         # print(f"Original encoded message {self.originalEncoded}")
         power = sum([a**2 for a in self.originalEncoded]) / len(self.originalEncoded) #E_b, for BPSK #E_b == E_s
         
         SNRLinear = 10**(SNR_DB/10)
-        R_c = 1/2
-        Eb_No = SNRLinear * R_c  # Divide by R_c instead of multiplying
-        noiseStd = numpy.sqrt(1 / (2 * Eb_No))
-        # noiseStd = numpy.sqrt(1 / (2*SNRLinear))
+        noiseStd = numpy.sqrt(1 / (2*SNRLinear)) # add 2 * SNR Linear
         noise = noiseStd * numpy.random.randn(len(self.originalEncoded))
         # print(f"Noise={noise}")
         bpsk = 2 * numpy.array(self.originalEncoded) - 1  # Convert to -1 and 1
@@ -270,7 +258,16 @@ class LDPCEncoder():
         plt.show()
 
 
-
+    def raw(self, codeword):
+        hardDecisions = []
+        for val in codeword:
+            if(val < 0 ):
+                hardDecisions.append(0)
+            else:
+                hardDecisions.append(1)
+        errors = numpy.sum(numpy.array(self.originalEncoded) != numpy.array(hardDecisions))
+        return errors/len(codeword)
+    
     def generateQPSK(self, length):
 
         QPSKSymbols = numpy.array([1+1j, 1-1j, -1+1j, -1-1j])
@@ -518,14 +515,60 @@ def plotRates():
     plt.show()
 
 
+# def plotFrameError(minSum=True, sumProd=False, bitFlip=False, readMatrixFile=False):
+#     snrRange = numpy.arange(-2, 4, 1)
+#     BEROut = []
+    
+#     totalFrameErrors = []
+#     sumProdBEROut = []
+#     bitFlipBEROut = []
+#     maxErrors = 50
+#     for snr in snrRange:
+#         avgBER = 0
+#         avgSumProdBER = 0
+#         avgBitFlipBER = 0
+#         frameErrors = 0
+#         iterations = 0
+#         while frameErrors < maxErrors:
+#             print(f"Iteration No. {iterations}, SNR: {snr}, Frame Errors: {frameErrors}")
+#             iterations += 1
+#             message1 = numpy.random.randint(0, 2, size=325).tolist()  
+#             test1.encode(message1)
+#             BER = test1.minSumDecode(test1.addNoiseBPSK(snr))
+#             if BER is FRAME_ERROR:
+#                 frameErrors += 1
+#             if iterations > 1000:
+#                 frameErrors = 0
+#                 break
+        
+#         totalFrameErrors.append(frameErrors/iterations)
+
+
+#         # test1.write("results2.txt", snr, avgBER/n, avgSumProdBER/5.5,avgBitFlipBER/n )
+#     plt.figure(figsize=(8, 5))
+#     plt.semilogy(snrRange, totalFrameErrors, marker='o', linestyle='-')  
+#     plt.xlabel("SNR (dB)")
+#     plt.ylabel("Frame Error Rate")
+#     plt.title("LDPC Bit-Flip Decoding: Frame Error vs. SNR at 1/4 Data Rate, n= 256, BPSK")
+#     plt.grid(True, which="both", linestyle="--")
+#     plt.show()
+# plotRates()
+  
+
+
+
+# test0.H, test0.G = readMatrix("parityMatrix.txt")
+
+
+
 def plotFrameError(minSum=True, sumProd=False, bitFlip=False, readMatrixFile=False):
-    snrRange = numpy.arange(-4, 4, 1)
+    snrRange = numpy.arange(3, 4, 0.4)
     BEROut = []
     
     totalFrameErrors = []
     sumProdBEROut = []
     bitFlipBEROut = []
-    maxErrors = 10
+    maxErrors = 50
     for snr in snrRange:
         avgBER = 0
         avgSumProdBER = 0
@@ -533,8 +576,9 @@ def plotFrameError(minSum=True, sumProd=False, bitFlip=False, readMatrixFile=Fal
         frameErrors = 0
         iterations = 0
         while frameErrors < maxErrors:
-            print(f"Iteration No. {iterations}, SNR: {snr}, Frame Errors: {frameErrors}")
+            
             iterations += 1
+            print(f"Iteration No. {iterations}, SNR: {snr}, Frame Errors: {frameErrors}, FER {frameErrors/iterations}")
             message1 = numpy.random.randint(0, 2, size=325).tolist()  
             test1.encode(message1)
             BER = test1.minSumDecode(test1.addNoiseBPSK(snr))
@@ -556,9 +600,9 @@ def plotFrameError(minSum=True, sumProd=False, bitFlip=False, readMatrixFile=Fal
     plt.grid(True, which="both", linestyle="--")
     plt.show()
 # plotRates()
-  
+plotFrameError()
 
 
-plot()
+# plotFrameError()
 # test0.H, test0.G = readMatrix("parityMatrix.txt")
 
