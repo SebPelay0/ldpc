@@ -115,7 +115,7 @@ class LDPCEncoder():
         symbolEnergyNoiseRatio = bitEnergyNoiseRatio * 2 # QPSK has 2 bits per symbol
 
         for index in range(len(codeword)):
-            sigma2 = 1 / (2 * 0.5* (10**(self.SNR / 10))) 
+            sigma2 = 1 / (2 *  (10**(self.SNR / 10))) 
             LLR = (2 * codeword[index]) / sigma2
             initialLLRs.append(LLR)
       
@@ -321,7 +321,7 @@ message0 = numpy.random.randint(0, 2, size=541).tolist()
 
 """"RATE 3/4"""
 
-test1 = LDPCEncoder(6,12, 648)
+test1 = LDPCEncoder(4,8, 648)
 message1 = numpy.random.randint(0, 2, size=329).tolist()  
 
 
@@ -395,7 +395,7 @@ def plot(minSum=True, sumProd=False, bitFlip=False, readMatrixFile=False):
             if readMatrixFile:
                 test1.H, test1.G = readMatrix("parityMatrix.txt")
             if minSum:
-                message1 = numpy.random.randint(0, 2, size=329).tolist()  
+                message1 = numpy.random.randint(0, 2, size=327).tolist()  
                 test1.encode(message1) 
                 noisyCodeword = test1.addNoiseBPSK(snr)
                 # BER = test0.bitFlipDecode(noisyCodeword)
@@ -563,13 +563,13 @@ def plotRates():
 # test0.H, test0.G = readMatrix("parityMatrix.txt")
 
 def plotFrameError(minSum=True, sumProd=False, bitFlip=False, readMatrixFile=False):
-    snrRange = numpy.arange(1.6, 3.6, 0.4)
+    snrRange = numpy.arange(1, 3, 0.5)
     BEROut = []
     
     totalFrameErrors = []
     sumProdBEROut = []
     bitFlipBEROut = []
-    maxErrors = 30
+    maxErrors = 10
     for snr in snrRange:
         avgBER = 0
         avgSumProdBER = 0
@@ -577,10 +577,9 @@ def plotFrameError(minSum=True, sumProd=False, bitFlip=False, readMatrixFile=Fal
         frameErrors = 0
         iterations = 0
         while frameErrors < maxErrors:
-            
             iterations += 1
             print(f"Iteration No. {iterations}, SNR: {snr}, Frame Errors: {frameErrors}, FER {frameErrors/iterations}")
-            message1 = numpy.random.randint(0, 2, size=329).tolist()  
+            message1 = numpy.random.randint(0, 2, size=327).tolist()  
             # test1.encode(message1)
             test1.SNR = snr
             noisy =test1.encode(message1, snr)
@@ -591,7 +590,7 @@ def plotFrameError(minSum=True, sumProd=False, bitFlip=False, readMatrixFile=Fal
             # BER = test1.minSumDecode(pyldpc.encode(test1.G, message1, snr))
             if BER is FRAME_ERROR:
                 frameErrors += 1
-            if iterations > 1000:
+            if iterations > 750:
                 frameErrors = 0
                 break
         
@@ -600,11 +599,15 @@ def plotFrameError(minSum=True, sumProd=False, bitFlip=False, readMatrixFile=Fal
 
         # test1.write("results2.txt", snr, avgBER/n, avgSumProdBER/5.5,avgBitFlipBER/n )
     plt.figure(figsize=(8, 5))
-    plt.semilogy(snrRange, totalFrameErrors, marker='o', linestyle='-')  
+    plt.semilogy(snrRange, totalFrameErrors, marker='o', linestyle='-') 
+    for i, (x, y) in enumerate(zip(snrRange, totalFrameErrors)):
+        offset = (-5, 5)[i % 2]  # Alternate vertical offset
+        plt.text(x, y * 1.2, f"{y:.3f}", fontsize=10, ha='right', va='bottom') 
     plt.xlabel("SNR (dB)")
     plt.ylabel("Frame Error Rate")
-    plt.title("LDPC Bit-Flip Decoding: Frame Error vs. SNR at 1/4 Data Rate, n= 256, BPSK")
+    plt.title("LDPC Bit-Flip Decoding: Frame Error vs. SNR at 1/2 Data Rate, n= 648, BPSK")
     plt.grid(True, which="both", linestyle="--")
+    
     plt.show()
 # plotRates()
 # plotFrameError()
