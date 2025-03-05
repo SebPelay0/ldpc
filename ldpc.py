@@ -18,21 +18,21 @@ class LDPCEncoder():
         self.PN = None
         if readDataMatrix:
             H,G = readMatrix("parityMatrix.txt")
-           
         else:
             H,G = pyldpc.make_ldpc(n,d_v, d_c,True,True, seed)
-            
+        
             #print(f"DV: {dv_distribution}, DC: {dc_distribution}")
         self.H = H
         self.G = G
-        self.y = 1
-        self.originalEncoded = 1;
-        self.m = n * (d_v/d_c)#num check nodes
-        self.SNR = 0
-        self.bitEnergyRatio = 0
-        self.numIterations = 0
-        self.messageDecoded = 0
+        self.m = n * (d_v/d_c) #num check nodes
+        self.y = None
+        self.originalEncoded = None
+        self.SNR = None
+        self.bitEnergyRatio = None
+        self.numIterations = None
+        self.messageDecoded = None
         self.spread = None
+        self.BER = 0
 
     def encode(self, message, snr):
       
@@ -134,7 +134,7 @@ class LDPCEncoder():
         # print(f"Hard {hardDecisions}")
         BER = 0
         errors = 0
-        while numIterations < 30:
+        while numIterations < 15:
             self.numIterations = numIterations
             if self.isValidCodeword(numpy.array(hardDecisions)):
                 
@@ -194,8 +194,6 @@ class LDPCEncoder():
                 # else: bitNodes[i] = 0
                 bitNodes[i] =  0.75 * (messagesReceivedByBits[i] + initialLLRs[i])
                 
-               
-        
             for i in range(len(bitNodes)):
                 if bitNodes[i] > 0:
                     hardDecisions[i] = 0
@@ -214,6 +212,7 @@ class LDPCEncoder():
         # print(f"Original{self.originalEncoded}\n")
         print(f"Decoding Failed, Best Guess - BER: {BER}, SNR {self.SNR}, Eb/No {self.bitEnergyRatio}")
         self.messageDecoded = bitNodes
+        self.BER = BER
         return FRAME_ERROR
 
     def addNoiseBPSK(self, SNR_DB, encoded, plot=False):
@@ -223,7 +222,6 @@ class LDPCEncoder():
         SNRLinear = 10**(SNR_DB/10)
         noiseStd = numpy.sqrt(1 / ( SNRLinear/ 0.5)  ) # add 2 * SNR Linear
         noise = noiseStd * numpy.random.randn(*encoded.shape)
-        measured_noise_std = numpy.std(self.y - (2 * numpy.array(encoded) - 1))
         # print(f"Expected Noise Std: {noiseStd}, Measured Noise Std: {measured_noise_std}")
         # print(noise[0:10])
         # print(f"Noise={noise}")
@@ -293,7 +291,6 @@ class LDPCEncoder():
         self.PN = numpy.random.randint(0,2, size=spreadFactor)
         finalSpread = []
         # print(f"Pseudo-Random Noise Code: {self.PN}")
-        # print(f"Original {self.originalEncoded}")
         for bit in self.originalEncoded:
             result = [A^bit for A in self.PN]
             finalSpread.append(result)
@@ -338,37 +335,34 @@ def readMatrix(filePath):
 
 # numpy.random.seed(42)
 #  Expected Noise Std: 0.7071067811865476, Measured Noise Std: 1.0
-Test = LDPCEncoder(2,4,8, readDataMatrix=True)
+Test = LDPCEncoder(2,4,648, readDataMatrix=True)
 def test(snr):
+
+    # DSSS Result
     message = numpy.random.randint(0,2,size=324)
-    Test.encode(message, snr)
+    nonSpread = Test.encode(message, snr)
     noisy = Test.spreadDSS(4, 0)
-    print(f"Noisy {noisy}")
     codeword = Test.deSpreadDSS(noisy)
-    print(f"Despread {codeword}")
-    return Test.minSumDecode(codeword)
+    print(F"Spread Result {Test.minSumDecode(codeword)}")
 
-# [[ 1.4040456  -0.72009848 -0.96278865  1.14014006]
-#  [-2.58890927  0.50195388  0.83554252 -0.76993264]
-#  [-0.9480784   0.84935142  0.76418154 -1.11269413]
-#  [ 2.44561307 -1.21335093 -1.66811847  0.85274585]
-#  [-1.04340024  0.58270395  1.24609292 -1.76272888]
-#  [ 0.42669303 -1.78342084 -1.5048976   1.09509052]
-#  [-0.26237081  0.56125471  0.6782352  -1.20025154]
-#  [ 0.22591687 -1.83990624 -1.20982926 -0.14128704]]
+    #Non-DSSS
+    print(F"Non-Spread Result {Test.minSumDecode(nonSpread)}")
 
+
+test(3)
 # it = 1
-# while test(1) != FRAME_ERROR:
+# while test(-2) != FRAME_ERROR:
 #     it +=1
 # print(it)
-"""RATE 5/6"""
-test0 = LDPCEncoder(2,12, 648)
+"""RATE 1/2"""
+test0 = LDPCEncoder(2,4, 64)
 message0 = numpy.random.randint(0, 2, size=541).tolist()  
 
 
 """"RATE 3/4"""
 
 test1 = LDPCEncoder(4,8, 648, readDataMatrix=True)
+# test1 = LDPCEncoder(2,4, 64, readDataMatrix=False)
 message1 = numpy.random.randint(0, 2, size=329).tolist()  
 
 
@@ -383,7 +377,6 @@ message3 = numpy.random.randint(0, 2, size=5).tolist()
 
 
 def writeData(filePath, BER, frameError):
-    
     with open(filePath, "a") as file:
         string ="BER Values: ["
         string += ", ".join(str(e) for e in BER) 
@@ -584,36 +577,41 @@ def plotRates():
 
 def plotFrameError(minSum=True, sumProd=False, bitFlip=False, readMatrixFile=False):
     print("Begin frame error plot")
-    snrRange = numpy.arange(-6, -5, 0.5)
+    snrRange = numpy.array([-8, -6, -5.8, -5.6, -5.4, -5.2, -5, -4, -3])
+
+    # snrRange = numpy.arange(-8, -3, 0.1)
     BEROut = []
     
     totalFrameErrors = []
     sumProdBEROut = []
     bitFlipBEROut = []
-    maxErrors = 10
+    maxErrors = 75
+    
     for snr in snrRange:
-        avgBER = 0
+        avgBER = []
         avgSumProdBER = 0
         avgBitFlipBER = 0
         frameErrors = 0
         iterations = 0
+        BERS = [0]
         while frameErrors < maxErrors:
             iterations += 1
             os.system("clear")
-            print(f"Iteration No. {iterations}, SNR: {snr}, Frame Errors: {frameErrors}, FER {frameErrors/iterations}")
+            print(f"Iteration No. {iterations}, SNR: {snr}, Frame Errors: {frameErrors}, FER {frameErrors/iterations}, AVG BER {sum(BERS)/len(BERS)}")
             message1 = numpy.random.randint(0, 2, size=324).tolist()  
             
             test1.encode(message1, snr)
             noisy = test1.spreadDSS(4, snr)
             codeword = test1.deSpreadDSS(noisy)
             BER =  test1.minSumDecode(codeword)
-           
-            
+            if BER != FRAME_ERROR:
+                BERS.append(BER)
 
             # BER = test1.minSumDecode(pyldpc.encode(test1.G, message1, snr))
             if BER is FRAME_ERROR:
+                BERS.append(test1.BER)
                 frameErrors += 1
-            if iterations > 750:
+            if iterations > 1500:
                 frameErrors = 0
                 break
         
@@ -625,15 +623,11 @@ def plotFrameError(minSum=True, sumProd=False, bitFlip=False, readMatrixFile=Fal
     plt.semilogy(snrRange, totalFrameErrors, marker='o', linestyle='-')  
     plt.xlabel("SNR (dB)")
     plt.ylabel("Frame Error Rate")
-    plt.title("LDPC Bit-Flip Decoding: Frame Error vs. SNR at 1/2 Data Rate, n= 648, BPSK")
+    plt.title("LDPC short block DSSS: Frame Error vs. SNR at 1/2 Data Rate, n= 64, BPSK")
     plt.grid(True, which="both", linestyle="--")
     
     plt.show() 
 # plotRates()
-# plotFrameError()
 
 
-# test0.H, test0.G = readMatrix("parityMatrix.txt")
-
-
-
+plotFrameError()

@@ -15,7 +15,7 @@ def readCCSDS(filepath):
 
 np.random.seed(12)
 def testCCSDS():
-    test = ldpc.LDPCEncoder(4,8,648, readDataMatrix=True)
+    test = ldpc.LDPCEncoder(4,8,16, readDataMatrix=True)
     # test.H, test.G = readCCSDS("Matrices/LDPC_CCSDS_256.mat")
     message = np.random.randint(0,2,size=324)
     test.encode(message, -2)
