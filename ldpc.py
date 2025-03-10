@@ -19,7 +19,7 @@ class LDPCEncoder():
         if readDataMatrix:
             H,G = readMatrix("parityMatrix.txt")
         else:
-            H,G = pyldpc.make_ldpc(n,d_v, d_c,True,True, seed)
+            H,G = pyldpc.make_ldpc(n,d_v, d_c,True,True)
         self.H = H
         self.G = G
         self.m = n * (d_v/d_c) #num check nodes
@@ -202,14 +202,12 @@ class LDPCEncoder():
 
     def addNoiseBPSK(self, SNR_DB, encoded, plot=False):
         # print(f"Original encoded message {self.originalEncoded}")
-        power = sum([a**2 for a in encoded]) / len(encoded) #E_b, for BPSK #E_b == E_s
+        power = sum([a**2 for a in encoded]) / len(encoded) 
         
         SNRLinear = 10**(SNR_DB/10)
-        noiseStd = numpy.sqrt(1 / ( SNRLinear/ 0.5)  ) # add 2 * SNR Linear
+        noiseStd = numpy.sqrt(1 / ( SNRLinear*2)  ) 
         noise = noiseStd * numpy.random.randn(*encoded.shape)
-        # print(f"Expected Noise Std: {noiseStd}, Measured Noise Std: {measured_noise_std}")
-        # print(noise[0:10])
-        # print(f"Noise={noise}")
+        
         bpsk = 2 * numpy.array(encoded) - 1  # Convert to -1 and 1
 
     
@@ -320,7 +318,7 @@ def readMatrix(filePath):
 
 # numpy.random.seed(42)
 #  Expected Noise Std: 0.7071067811865476, Measured Noise Std: 1.0
-Test = LDPCEncoder(2,4,648, readDataMatrix=True)
+Test = LDPCEncoder(4,8,648, readDataMatrix=True)
 def test(snr):
 
     # DSSS Result
@@ -334,7 +332,7 @@ def test(snr):
     # print(F"Non-Spread Result {Test.minSumDecode(nonSpread)}")
 
 # numpy.random.seed(21)
-test(-5.5)
+test(-6.5)
 # it = 1
 # while test(-2) != FRAME_ERROR:
 #     it +=1
@@ -346,7 +344,8 @@ message0 = numpy.random.randint(0, 2, size=541).tolist()
 
 """"RATE 3/4"""
 
-test1 = LDPCEncoder(4,8, 648, readDataMatrix=True)
+# test1 = LDPCEncoder(4,8, 648, readDataMatrix=True)
+test1 = LDPCEncoder(4,8,648, readDataMatrix=True)
 # test1 = LDPCEncoder(2,4, 64, readDataMatrix=False)
 message1 = numpy.random.randint(0, 2, size=329).tolist()  
 
@@ -562,7 +561,7 @@ def plotRates():
 
 def plotFrameError(minSum=True, sumProd=False, bitFlip=False, readMatrixFile=False):
     print("Begin frame error plot")
-    snrRange = numpy.array([-8, -6, -5.8, -5.6, -5.4, -5.2, -5, -4, -3])
+    snrRange = numpy.array([-8, -7, -6.8, -6.6, -6.4, -6.2, -6, -5, -3])
 
     # snrRange = numpy.arange(-8, -3, 0.1)
     BEROut = []
@@ -570,7 +569,7 @@ def plotFrameError(minSum=True, sumProd=False, bitFlip=False, readMatrixFile=Fal
     totalFrameErrors = []
     sumProdBEROut = []
     bitFlipBEROut = []
-    maxErrors = 75
+    maxErrors = 1000
     
     for snr in snrRange:
         avgBER = []
@@ -582,7 +581,7 @@ def plotFrameError(minSum=True, sumProd=False, bitFlip=False, readMatrixFile=Fal
         while frameErrors < maxErrors:
             iterations += 1
             os.system("clear")
-            print(f"Iteration No. {iterations}, SNR: {snr}, Frame Errors: {frameErrors}, FER {frameErrors/iterations}, AVG BER {sum(BERS)/len(BERS)}")
+            print(f"Iteration No. {iterations}, SNR: {snr}, Frame Errors: {frameErrors}, FER {frameErrors/iterations}")
             message1 = numpy.random.randint(0, 2, size=324).tolist()  
             
             test1.encode(message1, snr)
@@ -593,10 +592,10 @@ def plotFrameError(minSum=True, sumProd=False, bitFlip=False, readMatrixFile=Fal
                 BERS.append(BER)
 
             # BER = test1.minSumDecode(pyldpc.encode(test1.G, message1, snr))
-            if BER is FRAME_ERROR:
-                BERS.append(test1.BER)
+            if BER is  FRAME_ERROR:
+                BERS.append(1)
                 frameErrors += 1
-            if iterations > 1500:
+            if iterations > 12000:
                 frameErrors = 0
                 break
         
@@ -608,7 +607,7 @@ def plotFrameError(minSum=True, sumProd=False, bitFlip=False, readMatrixFile=Fal
     plt.semilogy(snrRange, totalFrameErrors, marker='o', linestyle='-')  
     plt.xlabel("SNR (dB)")
     plt.ylabel("Frame Error Rate")
-    plt.title("LDPC short block DSSS: Frame Error vs. SNR at 1/2 Data Rate, n= 64, BPSK")
+    plt.title("LDPC short block DSSS: Frame Error vs. SNR at 1/2 Data Rate, n= 6480, BPSK")
     plt.grid(True, which="both", linestyle="--")
     
     plt.show() 
