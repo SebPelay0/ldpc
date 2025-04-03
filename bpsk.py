@@ -74,7 +74,8 @@ class LDPCEncoder():
         self.originalEncoded = numpy.dot(self.G, message) % 2
         self.SNR = snr
         noisy = pyldpc.encode(self.G, message, snr)
-        # noisy = self.addNoiseBPSK(snr, self.originalEncoded)
+        # noisy = -1 * self.addNoiseBPSK(snr, self.originalEncoded)
+        
         return noisy
     
     def isValidCodeword(self, decoded_codeword):
@@ -145,20 +146,22 @@ class LDPCEncoder():
         # Estimate A Priori LLR's for each bit. 
         for index in range(len(codeword)):
             sigma2 = 1 / (2 *  (10**(self.SNR / 10))) 
-            if index < 80:
+            if index < -80:
                 initialLLRs.append(1e-9)
             else:
                 LLR = (2 * float(codeword[index])) / sigma2
                 initialLLRs.append(LLR)
         
-        # Bit-to-check messages
-        Q = {}  # bit-to-check messages
+        # Q=> Bit-to-check messages
+        Q = {}  
 
         for j in range(int(self.m)):
             for i in numpy.where(self.H[j] == 1)[0]:
                 if i not in Q:
                     Q[i] = {}
                 Q[i][j] = initialLLRs[i]
+
+        #R => Check to bit messages
         R = {j: {} for j in range(int(self.m))}
 
         # Initialize Q[i][j] with the channel LLRs
@@ -216,6 +219,7 @@ class LDPCEncoder():
             for i in range(len(bitNodes)):
                 incoming_checks = numpy.where(self.H[:, i] == 1)[0]
                 bitNodes[i] = initialLLRs[i] + sum(R[j][i] for j in incoming_checks)
+                # bitNodes[i] = numpy.clip(bitNodes[i], -1000.0, 1000.0)
                 
             for i in range(len(bitNodes)):
                 if bitNodes[i] > 0:
@@ -225,7 +229,7 @@ class LDPCEncoder():
                 for j in numpy.where(self.H[:, i] == 1)[0]:
                     other_checks = [k for k in numpy.where(self.H[:, i] == 1)[0] if k != j]
                     Q[i][j] = initialLLRs[i] + sum(R[k][i] for k in other_checks)
-
+            # Q[i][j] = numpy.clip(Q[i][j], -1000.0, -1000)
             numIterations += 1
         
         
@@ -237,6 +241,8 @@ class LDPCEncoder():
         
         errors_mask = (numpy.array(self.originalEncoded) != numpy.array(hardDecisions)).astype(int)
         error_indices = numpy.where(errors_mask == 1)[0]
+
+        
 
         return FRAME_ERROR
 
@@ -361,7 +367,7 @@ def readMatrixFile(filePath):
 
 
 #  Expected Noise Std: 0.7071067811865476, Measured Noise Std: 1.0
-
+numpy.random.seed(1)
 Test = LDPCEncoder(4,5,2000, readDataMatrix=True)
 def test(snr):
     # DSSS Result
@@ -370,13 +376,13 @@ def test(snr):
     nonSpread = Test.encode(message, snr)
     noisy = Test.spreadDSS(4, 0)
     codeword = Test.deSpreadDSS(noisy)
-    # sumProdEncode = pyldpc.encode(Test.G, message, snr)
+    # sumProdEncode = pyldpc.encode(Test.G, message, snr
     print(F"Spread Result {Test.minSumDecode(nonSpread)}")
     # print(F"Spread Result {pyldpc.decode(Test.H, sumProdEncode, snr, 30)}")
 
     #Non-DSSS
     # print(F"Non-Spread Result {Test.minSumDecode(nonSpread)}")
-test(-1.5)
+test(-1)
 # numpy.random.seed(21)
 """RATE 1/2"""
 test0 = LDPCEncoder(2,4, 64)
@@ -558,7 +564,7 @@ def plotRates():
 
 def plotFrameError(minSum=True, sumProd=False, bitFlip=False, readMatrixFile=False):
     print("Begin frame error plot")
-    snrRange = numpy.array([-3.4,-3.2, -3,-2.8,-2.4,-2, -1])
+    snrRange = numpy.array([-3.2,-2,-1.8,-1.6,-1.4,-1.2 -1])
 
     # snrRange = numpy.arange(-8, -3, 0.1)
     BEROut = []
@@ -606,7 +612,7 @@ def plotFrameError(minSum=True, sumProd=False, bitFlip=False, readMatrixFile=Fal
     plt.xlabel("SNR (dB)")
     
     plt.ylabel("Frame Error Rate")
-    plt.title("Punctured 5G LPDC. Frame Error vs. SNR at 1/5 Data Rate, n= 2000, z = 80")
+    plt.title("Structured LPDC. Frame Error vs. SNR at 1/5 Data Rate, n= 2000")
     plt.grid(True, which="both", linestyle="--")
     
     plt.show() 
