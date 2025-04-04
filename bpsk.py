@@ -146,29 +146,31 @@ class LDPCEncoder():
         # Estimate A Priori LLR's for each bit. 
         for index in range(len(codeword)):
             sigma2 = 1 / (2 *  (10**(self.SNR / 10))) 
-            if index < -80:
+            if index < 80:
                 initialLLRs.append(1e-9)
             else:
                 LLR = (2 * float(codeword[index])) / sigma2
                 initialLLRs.append(LLR)
         
-        # Q=> Bit-to-check messages
-        Q = {}  
-
+        # M=> Bit-to-check messages
+        M = {}  
+        # Initialize bit nodes with the channel LLRs
         for j in range(int(self.m)):
             for i in numpy.where(self.H[j] == 1)[0]:
-                if i not in Q:
-                    Q[i] = {}
-                Q[i][j] = initialLLRs[i]
+                if i not in M:
+                    M[i] = {}
+                M[i][j] = initialLLRs[i]
+        
+        # for i in range(self.n):
+        #     for j in numpy.where(self.H[:, i] == 1)[0]:
+        #         M[i][j] = initialLLRs[i]
 
-        #R => Check to bit messages
-        R = {j: {} for j in range(int(self.m))}
+        #E => Check to bit messages
+        E = {j: {} for j in range(int(self.m))}
 
-        # Initialize Q[i][j] with the channel LLRs
-        for i in range(self.n):
-            for j in numpy.where(self.H[:, i] == 1)[0]:
-                Q[i][j] = initialLLRs[i]
-        # Initialize check-to-bit messages
+     
+
+        # # Initialize check-to-bit messages
         
         initialLLRs = numpy.array(initialLLRs, dtype=float)
         bitNodes = initialLLRs.copy()
@@ -193,7 +195,6 @@ class LDPCEncoder():
 
             messagesReceivedByBits = numpy.zeros(len(bitNodes)) 
 
-    
             for j in range(int(self.m)):  
                 Ej = numpy.where(self.H[j] == 1)[0]  # All bits connected to check j
 
@@ -205,20 +206,20 @@ class LDPCEncoder():
                     others = [k for k in Ej if k != target]
 
                     # Get messages Q[k][j] from other bits to this check
-                    incoming = [Q[k][j] for k in others]
-                    abs_vals = numpy.abs(incoming)
+                    incoming = [M[k][j] for k in others]
+                    magnitudes = numpy.abs(incoming)
                     signs = numpy.sign(incoming)
                     signs[signs == 0.0] = 1  # Avoid 0 sign
 
-                    minLLR = numpy.min(abs_vals)
+                    minLLR = numpy.min(magnitudes)
                     signProd = numpy.prod(signs)
 
-                    # Apply scaling (optional)
-                    R[j][target] = 0.75 * minLLR * signProd
+                    
+                    E[j][target] = 0.75 * minLLR * signProd
         
             for i in range(len(bitNodes)):
                 incoming_checks = numpy.where(self.H[:, i] == 1)[0]
-                bitNodes[i] = initialLLRs[i] + sum(R[j][i] for j in incoming_checks)
+                bitNodes[i] = initialLLRs[i] + sum(E[j][i] for j in incoming_checks)
                 # bitNodes[i] = numpy.clip(bitNodes[i], -1000.0, 1000.0)
                 
             for i in range(len(bitNodes)):
@@ -228,8 +229,7 @@ class LDPCEncoder():
             for i in range(self.n):
                 for j in numpy.where(self.H[:, i] == 1)[0]:
                     other_checks = [k for k in numpy.where(self.H[:, i] == 1)[0] if k != j]
-                    Q[i][j] = initialLLRs[i] + sum(R[k][i] for k in other_checks)
-            # Q[i][j] = numpy.clip(Q[i][j], -1000.0, -1000)
+                    M[i][j] = initialLLRs[i] + sum(E[k][i] for k in other_checks)
             numIterations += 1
         
         
@@ -245,6 +245,122 @@ class LDPCEncoder():
         
 
         return FRAME_ERROR
+    
+
+
+
+    def sumProductDecode(self, codeword):
+        # codeword = -1  * codeword
+        print(f"Codeword: {self.originalEncoded.flatten()}")
+        bitNodes = numpy.array(codeword, dtype=float)  # Use soft channel values instead of hard bits]
+        
+        initialLLRs = []
+        numIterations = 0
+        # Estimate A Priori LLR's for each bit. 
+        for index in range(len(codeword)):
+            sigma2 = 1 / (2 *  (10**(self.SNR / 10))) 
+            if index < 80:
+                initialLLRs.append(1e-9)
+            else:
+                LLR = (2 * float(codeword[index])) / sigma2
+                initialLLRs.append(LLR)
+        
+        # M=> Bit-to-check messages
+        M = {}  
+        # Initialize bit nodes with the channel LLRs
+        for j in range(int(self.m)):
+            for i in numpy.where(self.H[j] == 1)[0]:
+                if i not in M:
+                    M[i] = {}
+                M[i][j] = initialLLRs[i]
+        
+        # for i in range(self.n):
+        #     for j in numpy.where(self.H[:, i] == 1)[0]:
+        #         M[i][j] = initialLLRs[i]
+
+        #E => Check to bit messages
+        E = {j: {} for j in range(int(self.m))}
+
+     
+
+        # # Initialize check-to-bit messages
+        
+        initialLLRs = numpy.array(initialLLRs, dtype=float)
+        bitNodes = initialLLRs.copy()
+        hardDecisions = [0]*len(bitNodes)
+        for i in range(len(bitNodes)):
+                if bitNodes[i] > 0:
+                    hardDecisions[i] = 0
+                else: hardDecisions[i] = 1
+    
+        BER = 0
+        errors = 0
+        while numIterations < 40:
+            self.numIterations = numIterations
+            errors = numpy.sum(numpy.array(self.originalEncoded) != numpy.array(hardDecisions))
+            print(f"Decoding Iteration {numIterations}: BER {errors/len(bitNodes)}")
+            #Test the hard decision on current soft values
+            if self.isValidCodeword(numpy.array(hardDecisions)):
+                errors = numpy.sum(numpy.array(self.originalEncoded) != numpy.array(hardDecisions))
+                print(f"Sum Product Decoding done after {numIterations} Iterations, BER {errors/len(bitNodes)}")
+                self.messageDecoded = hardDecisions
+                return errors/len(bitNodes)
+
+            messagesReceivedByBits = numpy.zeros(len(bitNodes)) 
+
+            for j in range(int(self.m)):  
+                Ej = numpy.where(self.H[j] == 1)[0]  # All bits connected to check j
+
+                if len(Ej) < 2:
+                    continue  # Skip underconnected checks
+
+                for target in Ej:
+                    # Use all other bits except the target
+                    others = [k for k in Ej if k != target]
+
+                    # Get valid messages bits to this check
+                    incoming = [M[k][j] for k in others]
+                    
+                    tanhValues = [numpy.tanh(M/2) for M in incoming]
+
+                    #Calculate product series
+                    product = 1
+                    for val in tanhValues:
+                        product *= val
+                    product = numpy.clip(product, -0.999999, 0.999999)
+                    
+                    #message formula
+                    E[j][target] = 2 * numpy.arctanh(product)
+        
+            for i in range(len(bitNodes)):
+                incoming_checks = numpy.where(self.H[:, i] == 1)[0]
+                bitNodes[i] = initialLLRs[i] + sum(E[j][i] for j in incoming_checks)
+                bitNodes[i] = numpy.clip(bitNodes[i], -100.0, 100.0)
+                
+            for i in range(len(bitNodes)):
+                if bitNodes[i] > 0:
+                    hardDecisions[i] = 0
+                else: hardDecisions[i] = 1
+            for i in range(self.n):
+                for j in numpy.where(self.H[:, i] == 1)[0]:
+                    other_checks = [k for k in numpy.where(self.H[:, i] == 1)[0] if k != j]
+                    M[i][j] = initialLLRs[i] + sum(E[k][i] for k in other_checks)
+            numIterations += 1
+        
+        
+        errors = numpy.sum(numpy.array(self.originalEncoded) != numpy.array(hardDecisions))
+        BER = errors/len(bitNodes) 
+        print(f"Decoding Failed, Best Guess - BER: {BER}, SNR {self.SNR}, Eb/No {self.bitEnergyRatio}")
+        self.messageDecoded = bitNodes
+        self.BER = BER
+        
+        errors_mask = (numpy.array(self.originalEncoded) != numpy.array(hardDecisions)).astype(int)
+        error_indices = numpy.where(errors_mask == 1)[0]
+
+        
+
+        return FRAME_ERROR
+    
 
     def addNoiseBPSK(self, SNR_DB, encoded, plot=False):
         power = sum([a**2 for a in encoded]) / len(encoded) 
@@ -367,22 +483,24 @@ def readMatrixFile(filePath):
 
 
 #  Expected Noise Std: 0.7071067811865476, Measured Noise Std: 1.0
-numpy.random.seed(1)
+
 Test = LDPCEncoder(4,5,2000, readDataMatrix=True)
 def test(snr):
     # DSSS Result
+    numpy.random.seed(12)
     print("Starting test...")
-    message = numpy.random.randint(0,2,size=400)
+    message = numpy.random.randint(0, 2, size=400)
     nonSpread = Test.encode(message, snr)
     noisy = Test.spreadDSS(4, 0)
     codeword = Test.deSpreadDSS(noisy)
     # sumProdEncode = pyldpc.encode(Test.G, message, snr
-    print(F"Spread Result {Test.minSumDecode(nonSpread)}")
+    print(F"Min Sum Result {Test.minSumDecode(nonSpread)}")
+    print(F"Sum Product Result {Test.sumProductDecode(nonSpread)}")
     # print(F"Spread Result {pyldpc.decode(Test.H, sumProdEncode, snr, 30)}")
 
     #Non-DSSS
     # print(F"Non-Spread Result {Test.minSumDecode(nonSpread)}")
-test(-1)
+test(-3.5)
 # numpy.random.seed(21)
 """RATE 1/2"""
 test0 = LDPCEncoder(2,4, 64)
@@ -590,7 +708,7 @@ def plotFrameError(minSum=True, sumProd=False, bitFlip=False, readMatrixFile=Fal
             noist = test1.encode(message1, snr)
             noisy = test1.spreadDSS(4, snr)
             codeword = test1.deSpreadDSS(noisy)
-            BER =  test1.minSumDecode(noist)
+            BER =  test1.sumProductDecode(noist)
             if BER != FRAME_ERROR:
                 BERS.append(BER)
 
