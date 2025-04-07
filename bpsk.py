@@ -341,19 +341,25 @@ class LDPCEncoder():
                     phiMagnitude = self.phi(phiSum)
                     E[j][target] = numpy.prod(signs) * phiMagnitude
         
-            for i in range(len(bitNodes)):
-                incoming_checks = numpy.where(self.H[:, i] == 1)[0]
-                bitNodes[i] = initialLLRs[i] + sum(E[j][i] for j in incoming_checks)
                 # bitNodes[i] = numpy.clip(bitNodes[i], -100.0, 100.0)
-                
-            for i in range(len(bitNodes)):
-                if bitNodes[i] > 0:
-                    hardDecisions[i] = 0
-                else: hardDecisions[i] = 1
+            
+            #Set new variable node messages, excluding each check node's own contribution
             for i in range(self.n):
                 for j in numpy.where(self.H[:, i] == 1)[0]:
                     other_checks = [k for k in numpy.where(self.H[:, i] == 1)[0] if k != j]
                     M[i][j] = initialLLRs[i] + sum(E[k][i] for k in other_checks)
+            
+            #Calculate LLR total for the variable node
+            for i in range(len(bitNodes)):
+                incoming_checks = numpy.where(self.H[:, i] == 1)[0]
+                bitNodes[i] = initialLLRs[i] + sum(E[j][i] for j in incoming_checks)
+
+            #Hard decision on each variable node. 
+            for i in range(len(bitNodes)):
+                if bitNodes[i] > 0:
+                    hardDecisions[i] = 0
+                else: hardDecisions[i] = 1
+     
             numIterations += 1
         
         
@@ -375,7 +381,9 @@ class LDPCEncoder():
         #Log approximation of tanh(x)
         # if x == 0:
         #     x = 1e-7
-        return numpy.log10((numpy.exp(x)+ 1)/(numpy.exp(x) -1))
+        x = numpy.clip(x, 1e-12,100)
+        return -numpy.log(numpy.tanh(x/2))
+        # return numpy.log((numpy.exp(x)+ 1)/(numpy.exp(x) -1))
 
     def addNoiseBPSK(self, SNR_DB, encoded, plot=False):
         power = sum([a**2 for a in encoded]) / len(encoded) 
@@ -520,7 +528,7 @@ def test(snr):
 """RATE 1/2"""
 test0 = LDPCEncoder(2,4, 64)
 message0 = numpy.random.randint(0, 2, size=541).tolist()  
-test(3.5)
+test(-3)
 
 """"RATE 3/4"""
 
@@ -697,7 +705,7 @@ def plotRates():
 
 def plotFrameError(minSum=True, sumProd=False, bitFlip=False, readMatrixFile=False):
     print("Begin frame error plot")
-    snrRange = numpy.array([ -1,-0.8,-0.6,-0.4,0])
+    snrRange = numpy.array([ -3, -3.0, -2.5,-2.0,-1])
 
     # snrRange = numpy.arange(-8, -3, 0.1)
     BEROut = []
@@ -705,7 +713,7 @@ def plotFrameError(minSum=True, sumProd=False, bitFlip=False, readMatrixFile=Fal
     totalFrameErrors = []
     sumProdBEROut = []
     bitFlipBEROut = []
-    maxErrors = 100
+    maxErrors = 750
     
     for snr in snrRange:
         avgBER = []
@@ -718,12 +726,12 @@ def plotFrameError(minSum=True, sumProd=False, bitFlip=False, readMatrixFile=Fal
             iterations += 1
             os.system("cls")
             print(f"Iteration No. {iterations}, SNR: {snr}, Frame Errors: {frameErrors}, FER {frameErrors/iterations}")
-            message1 = numpy.random.randint(0, 2, size=1000).tolist()  
+            message1 = numpy.random.randint(0, 2, size=400).tolist()  
             
             noist = test1.encode(message1, snr)
             # noisy = test1.spreadDSS(4, snr)
             # codeword = test1.deSpreadDSS(noisy)
-            BER =  test1.minSumDecode(noist)
+            BER =  test1.sumProductDecode(noist)
             if BER != FRAME_ERROR:
                 BERS.append(BER)
 
@@ -731,10 +739,10 @@ def plotFrameError(minSum=True, sumProd=False, bitFlip=False, readMatrixFile=Fal
             if BER is  FRAME_ERROR:
                 BERS.append(1)
                 frameErrors += 1
-            if iterations > 10000:
+            if iterations > 1000:
                 # frameErrors = 0
                 break
-            if iterations == 500 and frameErrors == 0:
+            if iterations == 350 and frameErrors == 0:
                 break
         
         totalFrameErrors.append(frameErrors/iterations)
@@ -751,4 +759,4 @@ def plotFrameError(minSum=True, sumProd=False, bitFlip=False, readMatrixFile=Fal
     plt.grid(True, which="both", linestyle="--")
     
     plt.show() 
-# plotFrameError()
+plotFrameError()
