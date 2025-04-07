@@ -263,7 +263,7 @@ class LDPCEncoder():
         for index in range(len(codeword)):
             sigma2 = 1 / (2 *  (10**(self.SNR / 10))) 
             if index < 80:
-                initialLLRs.append(1e-9)
+                initialLLRs.append(0.0)
             else:
                 LLR = (2 * float(codeword[index])) / sigma2
                 initialLLRs.append(LLR)
@@ -340,6 +340,7 @@ class LDPCEncoder():
                     
                     #message formula
                     phiSum = numpy.sum(self.phi(magnitudes)) #apply all phi(x)^-1=y on all magnitudes and take sum
+                    phiSum = numpy.clip(phiSum, 1e-12, 20)
                     phiMagnitude = self.phi(phiSum)
                     if phiSum <0:
                         print(f"phi sum {phiSum}")
@@ -386,8 +387,8 @@ class LDPCEncoder():
         # if x == 0:
         #     x = 1e-7
         x = numpy.clip(x, 1e-12,100)
-        # return -numpy.log(numpy.tanh(x/2))
-        return numpy.log((numpy.exp(x)+ 1)/(numpy.exp(x) -1))
+        return -numpy.log(numpy.tanh(x/2))
+        # return numpy.log((numpy.exp(x)+ 1)/(numpy.exp(x) -1))
 
     
     def addNoiseBPSK(self, SNR_DB, encoded, plot=False):
