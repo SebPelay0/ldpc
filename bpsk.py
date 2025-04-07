@@ -337,7 +337,7 @@ class LDPCEncoder():
                     # product =numpy.prod(signs) * numpy.prod(magnitudes)
                     
                     #message formula
-                    phiSum = numpy.sum(self.phi(magnitudes)) #apply all phi(x) on all magnitudes and take sum
+                    phiSum = numpy.sum(self.phi(magnitudes)) #apply all phi(x)^-1=y on all magnitudes and take sum
                     phiMagnitude = self.phiInverse(phiSum)
                     E[j][target] = numpy.prod(signs) * phiMagnitude
         
@@ -382,8 +382,8 @@ class LDPCEncoder():
         # if x == 0:
         #     x = 1e-7
         x = numpy.clip(x, 1e-12,100)
-        return -numpy.log(numpy.tanh(x/2))
-        # return numpy.log((numpy.exp(x)+ 1)/(numpy.exp(x) -1))
+        # return -numpy.log(numpy.tanh(x/2))
+        return numpy.log((numpy.exp(x)+ 1)/(numpy.exp(x) -1))
     def phiInverse(self, x):
         #Log approximation of tanh(x)
         # if x == 0:
@@ -712,7 +712,7 @@ def plotRates():
 
 def plotFrameError(minSum=True, sumProd=False, bitFlip=False, readMatrixFile=False):
     print("Begin frame error plot")
-    snrRange = numpy.array([ -3.5, -3.0, -2.5,-2.0,-1])
+    snrRange = numpy.array([ -1.5, -3.0, -2.5,-2.0,-1])
 
     # snrRange = numpy.arange(-8, -3, 0.1)
     BEROut = []
