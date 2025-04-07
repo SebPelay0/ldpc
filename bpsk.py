@@ -324,7 +324,7 @@ class LDPCEncoder():
                     magnitudes = []
                     for val in incoming:
                         magnitudes.append(numpy.abs(val))
-                        if val == 0:
+                        if val == 0 or val ==1e-9:
                             signs.append(1)
                         else:
                             signs.append(numpy.sign(val))
@@ -337,8 +337,8 @@ class LDPCEncoder():
                     # product =numpy.prod(signs) * numpy.prod(magnitudes)
                     
                     #message formula
-                    phiSum = numpy.sum(numpy.array(self.phi(magnitudes))) #apply all phi(x) on all magnitudes and take sum
-                    phiMagnitude = self.phi(phiSum)
+                    phiSum = numpy.sum(self.phi(magnitudes)) #apply all phi(x) on all magnitudes and take sum
+                    phiMagnitude = self.phiInverse(phiSum)
                     E[j][target] = numpy.prod(signs) * phiMagnitude
         
                 # bitNodes[i] = numpy.clip(bitNodes[i], -100.0, 100.0)
@@ -384,7 +384,14 @@ class LDPCEncoder():
         x = numpy.clip(x, 1e-12,100)
         return -numpy.log(numpy.tanh(x/2))
         # return numpy.log((numpy.exp(x)+ 1)/(numpy.exp(x) -1))
-
+    def phiInverse(self, x):
+        #Log approximation of tanh(x)
+        # if x == 0:
+        #     x = 1e-7
+        x = numpy.clip(x, 1e-12,100)
+        # return -numpy.log(numpy.tanh(x/2))
+        return (2* numpy.arctanh(numpy.exp(-x)))
+    
     def addNoiseBPSK(self, SNR_DB, encoded, plot=False):
         power = sum([a**2 for a in encoded]) / len(encoded) 
         
@@ -528,7 +535,7 @@ def test(snr):
 """RATE 1/2"""
 test0 = LDPCEncoder(2,4, 64)
 message0 = numpy.random.randint(0, 2, size=541).tolist()  
-test(-3)
+test(10.5)
 
 """"RATE 3/4"""
 
@@ -705,7 +712,7 @@ def plotRates():
 
 def plotFrameError(minSum=True, sumProd=False, bitFlip=False, readMatrixFile=False):
     print("Begin frame error plot")
-    snrRange = numpy.array([ -3, -3.0, -2.5,-2.0,-1])
+    snrRange = numpy.array([ -3.5, -3.0, -2.5,-2.0,-1])
 
     # snrRange = numpy.arange(-8, -3, 0.1)
     BEROut = []
