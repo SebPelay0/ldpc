@@ -21,8 +21,8 @@ class LDPCEncoder():
         self.seed = seed
         self.PN = None
         if readDataMatrix:
-            H,G = readMatrix("parityMatrix.txt")
-            # H = numpy.array(readMatrixFile("5GMatrix.mat")["H"], dtype=int)
+            # H,G = readMatrix("parityMatrix.txt")
+            H = numpy.array(readMatrixFile("5GMatrix.mat")["H"], dtype=int)
             # H = H[:1080,:] #HALF RATE  ROW REMOVAl
             G = pyldpc.coding_matrix(H)
             self.H = H
@@ -262,7 +262,7 @@ class LDPCEncoder():
         # Estimate A Priori LLR's for each bit. 
         for index in range(len(codeword)):
             sigma2 = 1 / (2 *  (10**(self.SNR / 10))) 
-            if index < -80:
+            if index < 80:
                 initialLLRs.append(1e-9)
             else:
                 LLR = (2 * float(codeword[index])) / sigma2
@@ -320,6 +320,8 @@ class LDPCEncoder():
 
                     # Get valid messages bits to this check
                     incoming = [M[k][j] for k in others]
+
+                    #Separate into bit values and reliability
                     signs = []
                     magnitudes = []
                     for val in incoming:
@@ -329,7 +331,7 @@ class LDPCEncoder():
                         else:
                             signs.append(numpy.sign(val))
                     
-                    tanhValues = numpy.array([numpy.tanh(M/2) for M in magnitudes])
+                    # tanhValues = numpy.array([numpy.tanh(M/2) for M in magnitudes])
                     magnitudes = numpy.array(magnitudes)
                     signs = numpy.array(signs)
 
@@ -338,7 +340,9 @@ class LDPCEncoder():
                     
                     #message formula
                     phiSum = numpy.sum(self.phi(magnitudes)) #apply all phi(x)^-1=y on all magnitudes and take sum
-                    phiMagnitude = self.phiInverse(phiSum)
+                    phiMagnitude = self.phi(phiSum)
+                    if phiSum <0:
+                        print(f"phi sum {phiSum}")
                     E[j][target] = numpy.prod(signs) * phiMagnitude
         
                 # bitNodes[i] = numpy.clip(bitNodes[i], -100.0, 100.0)
@@ -384,13 +388,7 @@ class LDPCEncoder():
         x = numpy.clip(x, 1e-12,100)
         # return -numpy.log(numpy.tanh(x/2))
         return numpy.log((numpy.exp(x)+ 1)/(numpy.exp(x) -1))
-    def phiInverse(self, x):
-        #Log approximation of tanh(x)
-        # if x == 0:
-        #     x = 1e-7
-        x = numpy.clip(x, 1e-12,100)
-        # return -numpy.log(numpy.tanh(x/2))
-        return (2* numpy.arctanh(numpy.exp(-x)))
+
     
     def addNoiseBPSK(self, SNR_DB, encoded, plot=False):
         power = sum([a**2 for a in encoded]) / len(encoded) 
@@ -712,7 +710,7 @@ def plotRates():
 
 def plotFrameError(minSum=True, sumProd=False, bitFlip=False, readMatrixFile=False):
     print("Begin frame error plot")
-    snrRange = numpy.array([2.6])
+    snrRange = numpy.array([-2.76])
 
     # snrRange = numpy.arange(-8, -3, 0.1)
     BEROut = []
@@ -733,7 +731,7 @@ def plotFrameError(minSum=True, sumProd=False, bitFlip=False, readMatrixFile=Fal
             iterations += 1
             os.system("cls")
             print(f"Iteration No. {iterations}, SNR: {snr}, Frame Errors: {frameErrors}, FER {frameErrors/iterations}")
-            message1 = numpy.random.randint(0, 2, size=324).tolist()  
+            message1 = numpy.random.randint(0, 2, size=400).tolist()  
             
             noist = test1.encode(message1, snr)
             # noisy = test1.spreadDSS(4, snr)
