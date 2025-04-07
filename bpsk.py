@@ -21,10 +21,10 @@ class LDPCEncoder():
         self.seed = seed
         self.PN = None
         if readDataMatrix:
-            # H,G = readMatrix("parityMatrix.txt")
-            H = numpy.array(readMatrixFile("5GMatrix.mat")["H"], dtype=int)
+            H,G = readMatrix("parityMatrix.txt")
+            # H = numpy.array(readMatrixFile("5GMatrix.mat")["H"], dtype=int)
             # H = H[:1080,:] #HALF RATE  ROW REMOVAl
-            G = pyldpc.coding_matrix(H)
+            # G = pyldpc.coding_matrix(H)
             self.H = H
             
             self.G = G
@@ -141,7 +141,7 @@ class LDPCEncoder():
 
     def minSumDecode(self, codeword):
         # codeword = -1  * codeword
-        print(f"Codeword: {self.originalEncoded.flatten()}")
+        # print(f"Codeword: {self.originalEncoded.flatten()}")
         bitNodes = numpy.array(codeword, dtype=float)  # Use soft channel values instead of hard bits]
         
         initialLLRs = []
@@ -244,9 +244,7 @@ class LDPCEncoder():
         
         errors_mask = (numpy.array(self.originalEncoded) != numpy.array(hardDecisions)).astype(int)
         error_indices = numpy.where(errors_mask == 1)[0]
-
         
-
         return FRAME_ERROR
     
 
@@ -262,7 +260,7 @@ class LDPCEncoder():
         # Estimate A Priori LLR's for each bit. 
         for index in range(len(codeword)):
             sigma2 = 1 / (2 *  (10**(self.SNR / 10))) 
-            if index < 80:
+            if index < -80:
                 initialLLRs.append(0.0)
             else:
                 LLR = (2 * float(codeword[index])) / sigma2
@@ -345,6 +343,7 @@ class LDPCEncoder():
                     if phiSum <0:
                         print(f"phi sum {phiSum}")
                     E[j][target] = numpy.prod(signs) * phiMagnitude
+                    
         
                 # bitNodes[i] = numpy.clip(bitNodes[i], -100.0, 100.0)
             
@@ -358,6 +357,7 @@ class LDPCEncoder():
             for i in range(len(bitNodes)):
                 incoming_checks = numpy.where(self.H[:, i] == 1)[0]
                 bitNodes[i] = initialLLRs[i] + sum(E[j][i] for j in incoming_checks)
+                bitNodes = numpy.clip(bitNodes, -50, 50)
 
             #Hard decision on each variable node. 
             for i in range(len(bitNodes)):
@@ -711,7 +711,7 @@ def plotRates():
 
 def plotFrameError(minSum=True, sumProd=False, bitFlip=False, readMatrixFile=False):
     print("Begin frame error plot")
-    snrRange = numpy.array([-2.76])
+    snrRange = numpy.array([2.6])
 
     # snrRange = numpy.arange(-8, -3, 0.1)
     BEROut = []
@@ -732,7 +732,7 @@ def plotFrameError(minSum=True, sumProd=False, bitFlip=False, readMatrixFile=Fal
             iterations += 1
             os.system("cls")
             print(f"Iteration No. {iterations}, SNR: {snr}, Frame Errors: {frameErrors}, FER {frameErrors/iterations}")
-            message1 = numpy.random.randint(0, 2, size=400).tolist()  
+            message1 = numpy.random.randint(0, 2, size=324).tolist()  
             
             noist = test1.encode(message1, snr)
             # noisy = test1.spreadDSS(4, snr)
