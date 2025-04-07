@@ -1,12 +1,14 @@
-import pyldpc
+
 import numpy
 import matplotlib.pyplot as plt
-import keyboard
 import math
 import time
 import os
 import scipy
 import scipy.io
+import sys
+sys.path.append(os.path.abspath("../pyldpc"))
+import pyldpc
 # numpy.random.seed(29)
 # H,G = pyldpc.make_ldpc(8,2, 4,True,True)
 FRAME_ERROR = None
@@ -21,6 +23,7 @@ class LDPCEncoder():
         if readDataMatrix:
             # H,G = readMatrix("parityMatrix.txt")
             H = numpy.array(readMatrixFile("5GMatrix.mat")["H"], dtype=int)
+            # H = H[:1080,:] #HALF RATE  ROW REMOVAl
             G = pyldpc.coding_matrix(H)
             self.H = H
             
@@ -252,7 +255,7 @@ class LDPCEncoder():
     def sumProductDecode(self, codeword):
         # codeword = -1  * codeword
         print(f"Codeword: {self.originalEncoded.flatten()}")
-        bitNodes = numpy.array(codeword, dtype=float)  # Use soft channel values instead of hard bits]
+        bitNodes = numpy.array(codeword, dtype=float)  # Use soft channel valus instead of hard bits]
         
         initialLLRs = []
         numIterations = 0
@@ -311,31 +314,37 @@ class LDPCEncoder():
             for j in range(int(self.m)):  
                 Ej = numpy.where(self.H[j] == 1)[0]  # All bits connected to check j
 
-                if len(Ej) < 2:
-                    continue  # Skip underconnected checks
-
                 for target in Ej:
                     # Use all other bits except the target
                     others = [k for k in Ej if k != target]
 
                     # Get valid messages bits to this check
                     incoming = [M[k][j] for k in others]
+                    signs = []
+                    magnitudes = []
+                    for val in incoming:
+                        magnitudes.append(numpy.abs(val))
+                        if val == 0:
+                            signs.append(1)
+                        else:
+                            signs.append(numpy.sign(val))
                     
-                    tanhValues = [numpy.tanh(M/2) for M in incoming]
+                    tanhValues = numpy.array([numpy.tanh(M/2) for M in magnitudes])
+                    magnitudes = numpy.array(magnitudes)
+                    signs = numpy.array(signs)
 
                     #Calculate product series
-                    product = 1
-                    for val in tanhValues:
-                        product *= val
-                    product = numpy.clip(product, -0.999999, 0.999999)
+                    # product =numpy.prod(signs) * numpy.prod(magnitudes)
                     
                     #message formula
-                    E[j][target] = 2 * numpy.arctanh(product)
+                    phiSum = numpy.sum(numpy.array(self.phi(magnitudes))) #apply all phi(x) on all magnitudes and take sum
+                    phiMagnitude = self.phi(phiSum)
+                    E[j][target] = numpy.prod(signs) * phiMagnitude
         
             for i in range(len(bitNodes)):
                 incoming_checks = numpy.where(self.H[:, i] == 1)[0]
                 bitNodes[i] = initialLLRs[i] + sum(E[j][i] for j in incoming_checks)
-                bitNodes[i] = numpy.clip(bitNodes[i], -100.0, 100.0)
+                # bitNodes[i] = numpy.clip(bitNodes[i], -100.0, 100.0)
                 
             for i in range(len(bitNodes)):
                 if bitNodes[i] > 0:
@@ -361,6 +370,12 @@ class LDPCEncoder():
 
         return FRAME_ERROR
     
+
+    def phi(self, x):
+        #Log approximation of tanh(x)
+        # if x == 0:
+        #     x = 1e-7
+        return numpy.log10((numpy.exp(x)+ 1)/(numpy.exp(x) -1))
 
     def addNoiseBPSK(self, SNR_DB, encoded, plot=False):
         power = sum([a**2 for a in encoded]) / len(encoded) 
@@ -487,7 +502,7 @@ def readMatrixFile(filePath):
 Test = LDPCEncoder(4,5,2000, readDataMatrix=True)
 def test(snr):
     # DSSS Result
-    numpy.random.seed(12)
+    # numpy.random.seed(12)
     print("Starting test...")
     message = numpy.random.randint(0, 2, size=400)
     nonSpread = Test.encode(message, snr)
@@ -500,12 +515,12 @@ def test(snr):
 
     #Non-DSSS
     # print(F"Non-Spread Result {Test.minSumDecode(nonSpread)}")
-test(-3.5)
+# test(-3.5)
 # numpy.random.seed(21)
 """RATE 1/2"""
 test0 = LDPCEncoder(2,4, 64)
 message0 = numpy.random.randint(0, 2, size=541).tolist()  
-
+test(3.5)
 
 """"RATE 3/4"""
 
@@ -682,7 +697,7 @@ def plotRates():
 
 def plotFrameError(minSum=True, sumProd=False, bitFlip=False, readMatrixFile=False):
     print("Begin frame error plot")
-    snrRange = numpy.array([-3.2,-2,-1.8,-1.6,-1.4,-1.2 -1])
+    snrRange = numpy.array([ -1,-0.8,-0.6,-0.4,0])
 
     # snrRange = numpy.arange(-8, -3, 0.1)
     BEROut = []
@@ -690,7 +705,7 @@ def plotFrameError(minSum=True, sumProd=False, bitFlip=False, readMatrixFile=Fal
     totalFrameErrors = []
     sumProdBEROut = []
     bitFlipBEROut = []
-    maxErrors = 75
+    maxErrors = 100
     
     for snr in snrRange:
         avgBER = []
@@ -701,14 +716,14 @@ def plotFrameError(minSum=True, sumProd=False, bitFlip=False, readMatrixFile=Fal
         BERS = [0]
         while frameErrors < maxErrors:
             iterations += 1
-            os.system("clear")
+            os.system("cls")
             print(f"Iteration No. {iterations}, SNR: {snr}, Frame Errors: {frameErrors}, FER {frameErrors/iterations}")
-            message1 = numpy.random.randint(0, 2, size=400).tolist()  
+            message1 = numpy.random.randint(0, 2, size=1000).tolist()  
             
             noist = test1.encode(message1, snr)
-            noisy = test1.spreadDSS(4, snr)
-            codeword = test1.deSpreadDSS(noisy)
-            BER =  test1.sumProductDecode(noist)
+            # noisy = test1.spreadDSS(4, snr)
+            # codeword = test1.deSpreadDSS(noisy)
+            BER =  test1.minSumDecode(noist)
             if BER != FRAME_ERROR:
                 BERS.append(BER)
 
@@ -716,8 +731,10 @@ def plotFrameError(minSum=True, sumProd=False, bitFlip=False, readMatrixFile=Fal
             if BER is  FRAME_ERROR:
                 BERS.append(1)
                 frameErrors += 1
-            if iterations > 2000:
-                frameErrors = 0
+            if iterations > 10000:
+                # frameErrors = 0
+                break
+            if iterations == 500 and frameErrors == 0:
                 break
         
         totalFrameErrors.append(frameErrors/iterations)
@@ -730,8 +747,8 @@ def plotFrameError(minSum=True, sumProd=False, bitFlip=False, readMatrixFile=Fal
     plt.xlabel("SNR (dB)")
     
     plt.ylabel("Frame Error Rate")
-    plt.title("Structured LPDC. Frame Error vs. SNR at 1/5 Data Rate, n= 2000")
+    plt.title("5G LDPC Frame Error vs. SNR at 1/3 Data Rate, n= 2000, z = 80")
     plt.grid(True, which="both", linestyle="--")
     
     plt.show() 
-plotFrameError()
+# plotFrameError()
