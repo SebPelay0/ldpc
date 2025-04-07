@@ -21,8 +21,8 @@ class LDPCEncoder():
         self.seed = seed
         self.PN = None
         if readDataMatrix:
-            # H,G = readMatrix("parityMatrix.txt")
-            H = numpy.array(readMatrixFile("5GMatrix.mat")["H"], dtype=int)
+            H,G = readMatrix("parityMatrix.txt")
+            # H = numpy.array(readMatrixFile("5GMatrix.mat")["H"], dtype=int)
             # H = H[:1080,:] #HALF RATE  ROW REMOVAl
             G = pyldpc.coding_matrix(H)
             self.H = H
@@ -254,7 +254,7 @@ class LDPCEncoder():
 
     def sumProductDecode(self, codeword):
         # codeword = -1  * codeword
-        print(f"Codeword: {self.originalEncoded.flatten()}")
+        # print(f"Codeword: {self.originalEncoded.flatten()}")
         bitNodes = numpy.array(codeword, dtype=float)  # Use soft channel valus instead of hard bits]
         
         initialLLRs = []
@@ -262,7 +262,7 @@ class LDPCEncoder():
         # Estimate A Priori LLR's for each bit. 
         for index in range(len(codeword)):
             sigma2 = 1 / (2 *  (10**(self.SNR / 10))) 
-            if index < 80:
+            if index < -80:
                 initialLLRs.append(1e-9)
             else:
                 LLR = (2 * float(codeword[index])) / sigma2
@@ -535,12 +535,12 @@ def test(snr):
 """RATE 1/2"""
 test0 = LDPCEncoder(2,4, 64)
 message0 = numpy.random.randint(0, 2, size=541).tolist()  
-test(10.5)
+# test(10.5)
 
 """"RATE 3/4"""
 
 # test1 = LDPCEncoder(4,8, 648, readDataMatrix=True)
-test1 = LDPCEncoder(4,5,2000, readDataMatrix=True)
+test1 = LDPCEncoder(4,5,648, readDataMatrix=True)
 # test1 = LDPCEncoder(2,4, 64, readDataMatrix=False)
 message1 = numpy.random.randint(0, 2, size=329).tolist()  
 
@@ -712,7 +712,7 @@ def plotRates():
 
 def plotFrameError(minSum=True, sumProd=False, bitFlip=False, readMatrixFile=False):
     print("Begin frame error plot")
-    snrRange = numpy.array([ -1.5, -3.0, -2.5,-2.0,-1])
+    snrRange = numpy.array([2.6])
 
     # snrRange = numpy.arange(-8, -3, 0.1)
     BEROut = []
@@ -733,7 +733,7 @@ def plotFrameError(minSum=True, sumProd=False, bitFlip=False, readMatrixFile=Fal
             iterations += 1
             os.system("cls")
             print(f"Iteration No. {iterations}, SNR: {snr}, Frame Errors: {frameErrors}, FER {frameErrors/iterations}")
-            message1 = numpy.random.randint(0, 2, size=400).tolist()  
+            message1 = numpy.random.randint(0, 2, size=324).tolist()  
             
             noist = test1.encode(message1, snr)
             # noisy = test1.spreadDSS(4, snr)
