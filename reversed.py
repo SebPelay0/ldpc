@@ -1,4 +1,3 @@
-import commpy.modulation
 import pyldpc
 import numpy
 import matplotlib.pyplot as plt
@@ -6,29 +5,108 @@ import keyboard
 import math
 import time
 import os
-
-import commpy.modulation as modulate
-import commpy
-
-
-H,G = pyldpc.make_ldpc(8,2, 4,True,True)
+import scipy
+import scipy.io
+# numpy.random.seed(29)
+# H,G = pyldpc.make_ldpc(8,2, 4,True,True)
 FRAME_ERROR = None
 
+
+import matplotlib.pyplot as plt
+import numpy as np
+
+# Replace 0s with a small value for plotting
+def clip_fer(fer_list, floor=1e-3):
+    return [max(floor, val) for val in fer_list]
+
+# SNR values
+snrs_wifi = [1.0, 1.5, 2.0, 2.5, 3.0, 3.5]
+fer_wifi = [0.7894736842105263,
+    0.7352941176470589,
+    0.623,
+    0.4716981132075472,
+    0.03125,
+    0.00016233766233766234]  # From image
+
+snrs_exp = [-4,-3.5, -3, -2.75, -2.5, -2.25, -2, -1, 0]
+fer_5g = [
+    0.95, 0.919, 0.853, 0.623, 0.0047,0.0001, 0.0003, 1e-5, 1e-5
+]
+
+fer_structured = [
+    0.95, 0.859, 0.753, 0.623, 0.472, 0.313, 0.01, 1e-3, 1e-5
+]
+# Apply clipping
+fer_5g_clipped = clip_fer(fer_5g)
+fer_structured_clipped = clip_fer(fer_structured)
+fer_wifi_clipped = clip_fer(fer_wifi)
+
+# Plot
+plt.figure(figsize=(10, 6))
+plt.semilogy(snrs_exp, fer_5g_clipped, marker='o', label='5G LDPC (Rate 1/5), z=80')
+plt.semilogy(snrs_exp, fer_structured_clipped, marker='s', label='Structured LDPC (Rate 1/5)')
+plt.semilogy(snrs_wifi, fer_wifi_clipped, marker='^', label='Wi-Fi LDPC (Rate 1/2) [Image]')
+
+plt.grid(True, which='both', linestyle='--', linewidth=0.5)
+plt.xlabel('SNR (dB)')
+plt.ylabel('Frame Error Rate (FER)')
+plt.title('FER Comparison of LDPC Codes')
+plt.legend()
+plt.ylim(1e-3, 1)  # Set lower limit to show convergence
+plt.tight_layout()
+plt.show()
+
 class LDPCEncoder():
-    def __init__(self, dV, dC, n, seed = 20, readDataMatrix= False):
-        self.dV = dV # number of times each message bit appears in a parity equation 
-        self.dC = dC # num bits checked in a parity equation // code rate => 1 -(d_v/d_c)
+    def __init__(self, d_v, d_c, n, seed = 20, readDataMatrix= False):
+        self.d_v = d_v # number of times each message bit appears in a parity equation 
+        self.d_c = d_c # num bits checked in a parity equation // code rate => 1 -(d_v/d_c)
         self.n = n
         self.seed = seed
         self.PN = None
         if readDataMatrix:
-            H,G = readMatrix("parityMatrix.txt")
-        else:
-            H,G = pyldpc.make_ldpc(n,dV, dC,True,True)
-        self.H = H
-        self.G = G
-        self.m = n * (dV/dC) #num check nodes
+            # H,G = readMatrix("parityMatrix.txt")
+            H = numpy.array(readMatrixFile("5GMatrix.mat")["H"], dtype=int)
+            
+            self.H = H
+            n_cols = H.shape[1]
+            k = 40
+            H_swapped = H.copy()
+            H_swapped[:, :k], H_swapped[:, -k:] = H[:, -k:].copy(), H[:, :k].copy()
 
+            self.H = H_swapped
+            G = pyldpc.coding_matrix(self.H)
+            self.G = G
+            self.m = H.shape[0]
+
+            # numpy.savetxt("H.txt", H, fmt='%d')
+            # print(H)
+            # print(H.shape)
+            # plt.figure(figsize=(10, 4))
+            # row_weights = numpy.sum(H, axis=1)
+            # column_weights = numpy.sum(H, axis=0)
+            # plt.bar(range(len(row_weights)), row_weights)
+            # plt.xlabel("Row Index")
+            # plt.ylabel("Number of 1s")
+            # plt.title("Distribution of 1s in Each Row")
+            # plt.show()
+
+            # # Plot column weights
+            # plt.figure(figsize=(10, 4))
+            # plt.bar(range(len(column_weights)), column_weights)
+            # plt.xlabel("Column Index")
+            # plt.ylabel("Number of 1s")
+            # plt.title("Distribution of 1s in Each Column")
+            # plt.show()
+            print(G.shape)
+            
+        else:
+            H,G = pyldpc.make_ldpc(n,d_v, d_c,True,True)
+            self.H = H
+            self.G = G
+            self.m = n * (d_v/d_c) #num check nodesQQ
+        
+        nonZero = numpy.count_nonzero(G)
+        
         self.y = None
         self.originalEncoded = None
         self.SNR = None
@@ -37,46 +115,24 @@ class LDPCEncoder():
         self.messageDecoded = None
         self.spread = None
         self.BER = 0
-        self.originalLength  = 0
+        
 
-    def encode(self, message, snr, M=2):
+    def encode(self, message, snr):
         if(len(message) != self.G.shape[1]):
             print("Invalid Message Length: G is " + str(self.G.shape[1]) + " message is " + str(len(message)))
             return
-        self.originalEncoded = numpy.dot(self.G, message) % 2
-
-        #Standard BPSK
-        if M==2:
-            self.originalEncoded = numpy.dot(self.G, message) % 2
-            self.SNR = snr
-            noisy = pyldpc.encode(self.G, message, snr)
-            return noisy
-
         
-        #M-QAM
-        else:
-            self.originalEncoded = numpy.dot(self.G, message) % 2
-            self.originalLength = len(self.originalEncoded)
-            self.SNR = snr
-            modem = modulate.QAMModem(M)
-            k = int(numpy.log2(M))
-            
-            if len(self.originalEncoded) % k != 0:
-                print("Encoded message length not divisible by modulation scheme, padding required.")
-                padLength = k - (len(self.originalEncoded) % k)  # Compute padding
-                self.originalEncoded = numpy.append(self.originalEncoded, numpy.zeros(padLength, dtype=int))
-
-            bitGroups = self.originalEncoded.reshape(-1, k)
-            print(f"Original encoded {self.originalEncoded}")
-            QAMSymbols = modem.modulate(bitGroups.flatten())
-            print(f"Symbols {QAMSymbols}")
-            noisy = self.addNoiseQAM(QAMSymbols, snr, plot=False)
-            return noisy
+        self.originalEncoded = numpy.dot(self.G, message) % 2
+        self.SNR = snr
+        noisy = pyldpc.encode(self.G, message, snr)
+        # noisy = -1 * self.addNoiseBPSK(snr, self.originalEncoded)
+        
+        return noisy
     
     def isValidCodeword(self, decoded_codeword):
         syndrome = numpy.dot(self.H, decoded_codeword.T) % 2
         is_valid = numpy.all(syndrome == 0)
-       # print(f"syndome {syndrome}")
+        # print(f"syndome {syndrome}")
         return is_valid
 
     def bitFlipDecode(self, codeword):
@@ -96,8 +152,6 @@ class LDPCEncoder():
         while numIterations < 10:
             if self.isValidCodeword(numpy.array(bitNodes)):
                 errors = numpy.sum(numpy.array(self.originalEncoded) != numpy.array(bitNodes))
-                # print(f"BER {errors/len(bitNodes)}")
-                # print(f"Decoded {bitNodes}")
                 print(f"Bit flip decoding done after {numIterations} iterations")
                 return errors/len(bitNodes)
 
@@ -107,8 +161,7 @@ class LDPCEncoder():
             #Pass the bit node messages into check nodes
             for j in range(0, int(self.m)):
                 Ej = numpy.where(self.H[j] == 1)[0]  #these are the bit nodes that should receive a message from each check node
-                bitNodeIndex = 0
-                #calcualte Bi
+    
                 message = 0
                 checkParity = 0
                 for i in Ej:
@@ -134,113 +187,150 @@ class LDPCEncoder():
         BER = errors/len(bitNodes)
         return BER
 
-    def minSumDecode(self, codeword, M):
-        # codeword = codeword * -1
-        initialLLRs =[]
-        if M == 2:  # BPSK
-            bitNodes = numpy.array(codeword, dtype=float)
-            for index in range(len(codeword)):
-                sigma2 = 1 / (2 *  (10**(self.SNR / 10))) 
-                LLR = (2 * codeword[index]) / sigma2
-
+    def minSumDecode(self, codeword):
+        # codeword = -1  * codeword
+        print(f"Codeword: {self.originalEncoded.flatten()}")
+        self.originalEncoded = self.originalEncoded[::-1]
+        bitNodes = numpy.array(codeword, dtype=float)  # Use soft channel values instead of hard bits]
+        self.H = self.H[:, ::-1]
+        llr_history = []
+        # Reverse codeword and recompute LLRs
+        codeword = codeword[::-1]
+        initialLLRs = []
+        numIterations = 0
+        # Estimate A Priori LLR's for each bit. 
+        for index in range(len(codeword)):
+            sigma2 = 1 / (2 *  (10**(self.SNR / 10))) 
+            if index < 40:
+                initialLLRs.append(1e-9)
+            else:
+                LLR = (2 * float(codeword[index])) / sigma2
                 initialLLRs.append(LLR)
         
-        else:  # M-QAM
-            initialLLRs = self.calculateLLRS(codeword, M)
-        # self.originalEncoded = self.originalEncoded[:self.originalLength]
+        # Bit-to-check messages
+        Q = {}  # bit-to-check messages
+
+        for j in range(int(self.m)):
+            for i in numpy.where(self.H[j] == 1)[0]:
+                if i not in Q:
+                    Q[i] = {}
+                Q[i][j] = initialLLRs[i]
+        R = {j: {} for j in range(int(self.m))}
+
+        # Initialize Q[i][j] with the channel LLRs
+        for i in range(self.n):
+            for j in numpy.where(self.H[:, i] == 1)[0]:
+                Q[i][j] = initialLLRs[i]
+        # Initialize check-to-bit messages
+        
         initialLLRs = numpy.array(initialLLRs, dtype=float)
-
-        #Bitnodes initialised to a priori LLRS
         bitNodes = initialLLRs.copy()
-        numIterations = 0
-
-        #make hard decision on initial llr's 
-        hardDecisions = bitNodes.copy()
+        hardDecisions = [0]*len(bitNodes)
+        for i in range(len(bitNodes)):
+                if bitNodes[i] > 0:
+                    hardDecisions[i] = 0
+                else: hardDecisions[i] = 1
+    
         BER = 0
         errors = 0
-        while numIterations < 10:
+        while numIterations < 30:
             self.numIterations = numIterations
-
+            errors = numpy.sum(numpy.array(self.originalEncoded) != numpy.array(hardDecisions))
+            print(f"Decoding Iteration {numIterations}: BER {errors/len(bitNodes)}")
             #Test the hard decision on current soft values
             if self.isValidCodeword(numpy.array(hardDecisions)):
                 errors = numpy.sum(numpy.array(self.originalEncoded) != numpy.array(hardDecisions))
                 print(f"Min Sum Decoding done after {numIterations} Iterations, BER {errors/len(bitNodes)}")
                 self.messageDecoded = hardDecisions
-                print(f"Bitnodes B {bitNodes}")
                 return errors/len(bitNodes)
 
-            #Reset message sums to zero 
             messagesReceivedByBits = numpy.zeros(len(bitNodes)) 
+
     
             for j in range(int(self.m)):  
-                Ej = numpy.where(self.H[j] == 1)[0]  # Get bit indices connected to check node j
-                
-                if len(Ej) < 2:
-                    continue  # Skip if not enough connections
+                Ej = numpy.where(self.H[j] == 1)[0]  # All bits connected to check j
 
-                # Compute sign product and minimum  LLR excluding target
-                messageSign = 1
+                if len(Ej) < 2:
+                    continue  # Skip underconnected checks
+
                 for target in Ej:
-                    excludeTarget = numpy.setdiff1d(Ej, target)  # Exclude target bit
-                    minLLR = numpy.min(numpy.abs(bitNodes[excludeTarget]))
-                    messageSign = numpy.prod(numpy.sign(bitNodes[excludeTarget]))  
-                    message = minLLR * messageSign
-                    messagesReceivedByBits[target] += message
-                    
+                    # Use all other bits except the target
+                    others = [k for k in Ej if k != target]
+
+                    # Get messages Q[k][j] from other bits to this check
+                    incoming = [Q[k][j] for k in others]
+                    abs_vals = numpy.abs(incoming)
+                    signs = numpy.sign(incoming)
+                    signs[signs == 0.0] = 1  # Avoid 0 sign
+
+                    minLLR = numpy.min(abs_vals)
+                    signProd = numpy.prod(signs)
+
+                    # Apply scaling (optional)
+                    R[j][target] = 0.75 * minLLR * signProd
         
-            bitValsTest = []
             for i in range(len(bitNodes)):
-                # if messagesReceivedByBits[i] + initialLLRs[i] < 0:
-                #     bitNodes[i]  = 1
-                # else: bitNodes[i] = 0
-                bitNodes[i] =  0.75 * (messagesReceivedByBits[i] + initialLLRs[i])
-                
+                incoming_checks = numpy.where(self.H[:, i] == 1)[0]
+                bitNodes[i] = initialLLRs[i] + sum(R[j][i] for j in incoming_checks)
+                # bitNodes[i] = numpy.clip(bitNodes[i], -1000.0, 1000.0)
+            llr_history.append(bitNodes.copy())
+
             for i in range(len(bitNodes)):
-                if bitNodes[i] < 0:
+                if bitNodes[i] > 0:
                     hardDecisions[i] = 0
                 else: hardDecisions[i] = 1
-
-            # if numpy.array_equal(previousBitNodes, bitNodes):  # Stop if LLRs converge
-            #     print("No changes, stopping early.")
-            #     break
-
+            for i in range(self.n):
+                for j in numpy.where(self.H[:, i] == 1)[0]:
+                    other_checks = [k for k in numpy.where(self.H[:, i] == 1)[0] if k != j]
+                    Q[i][j] = initialLLRs[i] + sum(R[k][i] for k in other_checks)
+            # Q[i][j] = numpy.clip(Q[i][j], -1000.0, -1000)
             numIterations += 1
         
-        
+
+        # Track which bits were punctured
+        punctured_mask = numpy.zeros(len(bitNodes), dtype=bool)
+        punctured_mask[-40:] = True  # Adjust this depending on your puncturing
+
+        # Final decoded bits and true bits
+        final_hard = numpy.array(hardDecisions)
+        true_bits = numpy.array(self.originalEncoded)
+        errors = (final_hard != true_bits)
+
+            
+        plt.figure(figsize=(14, 5))
+
+        # Plot non-punctured bits
+        for i in numpy.where(~punctured_mask)[0]:
+            color = "green" if not errors[i] else "red"
+            plt.scatter(i, bitNodes[i], color=color, marker="o", s=20)
+
+        # Plot punctured bits
+        for i in numpy.where(punctured_mask)[0]:
+            color = "green" if not errors[i] else "red"
+            plt.scatter(i, bitNodes[i], color=color, marker="^", s=30)
+
+        plt.axhline(0, color='gray', linestyle='--')
+        plt.title("Final BitNode LLRs After Decoding\nGreen = correct, Red = error\nCircle = non-punctured, Triangle = punctured")
+        plt.xlabel("Bit Index")
+        plt.ylabel("LLR Value")
+        plt.grid(True)
+        plt.tight_layout()
+        plt.show()
+
         errors = numpy.sum(numpy.array(self.originalEncoded) != numpy.array(hardDecisions))
         BER = errors/len(bitNodes) 
-        # print(f"Bitnodes{bitNodes}\n")
-        # print(f"Original{self.originalEncoded}\n")
         print(f"Decoding Failed, Best Guess - BER: {BER}, SNR {self.SNR}, Eb/No {self.bitEnergyRatio}")
         self.messageDecoded = bitNodes
         self.BER = BER
-        print(f"Bitnodes {bitNodes}")
-        plt.figure(figsize=(7, 7))
-        print(len(bitNodes))
         
-        hardBits = numpy.where(bitNodes < 0, 0, 1)
-        mistakes = numpy.where(hardBits != self.originalEncoded)[0]  
+        errors_mask = (numpy.array(self.originalEncoded) != numpy.array(hardDecisions)).astype(int)
+        error_indices = numpy.where(errors_mask == 1)[0]
 
-        plt.plot(numpy.arange(len(mistakes)), mistakes)
-        # plt.plot(numpy.arange(len(self.originalEncoded)), self.originalEncoded)
-        plt.show()
         return FRAME_ERROR
 
-
-    def calculateLLRS(self, codeword, M):
-        print(f"SNR{self.SNR}")
-        modem = modulate.QAMModem(M)  # Create QAM modem
-        
-        sigma2 = 1 / (2 *  (10**(self.SNR / 10))) 
-        LLRs = modem.demodulate(codeword, demod_type='soft', noise_var=sigma2)
-        
-        print(f"len LLRS {len(LLRs)}")
-        print(f" LLRS {LLRs}")
-        return LLRs
-    
     def addNoiseBPSK(self, SNR_DB, encoded, plot=False):
-        # print(f"Original encoded message {self.originalEncoded}")
         power = sum([a**2 for a in encoded]) / len(encoded) 
+        
         SNRLinear = 10**(SNR_DB/10)
         noiseStd = numpy.sqrt(1 / ( SNRLinear*2)  ) 
         noise = noiseStd * numpy.random.randn(*encoded.shape)
@@ -266,31 +356,29 @@ class LDPCEncoder():
         return y
 
 
-    def addNoiseQAM(self,qamSmbols, SNR_dB, plot=False):
+    def addNoiseQPSK(self, complexSignal, SNR_DB):
+        SNRLinear = 10**(SNR_DB/10)
+        power = sum([a**2 for a in complexSignal]) / len(complexSignal) #E_b, for BPSK #E_b == E_s
         
-        SNR_linear = 10**(SNR_dB / 10)
-        power = numpy.mean(abs(qamSmbols)**2)  # Proper power calculation
-        noise_std = numpy.sqrt(power / (2 * SNR_linear))
-        noise = noise_std * (numpy.random.randn(len(qamSmbols)) + 1j * numpy.random.randn(len(qamSmbols)))
-        noisy_qam = qamSmbols + noise
-
-        if plot:
-            plt.figure(figsize=(7, 7))
-            plt.scatter(noisy_qam.real, noisy_qam.imag, color='blue', marker='x', )
-            plt.scatter(qamSmbols.real, qamSmbols.imag, color='red', marker='o',  s=35)
-            plt.axhline(0, color='black', linestyle='--', linewidth=0.5)
-            plt.axvline(0, color='black', linestyle='--', linewidth=0.5)
-            plt.grid(True, linestyle='--', linewidth=0.5)
-            plt.xlabel("Imaginary")
-            plt.ylabel("Real")
-            plt.title(f"M-QAM Constellation with AWGN (SNR = {SNR_dB} dB)")
-            plt.legend()
-            plt.show()
-
-        return noisy_qam
+   
+        noise = numpy.sqrt(power / (2*SNRLinear)) * (numpy.random.randn(len(complexSignal)) + 1j *(numpy.random.randn(len(complexSignal))))
+        y = complexSignal + noise
+        print(y)
+        plt.figure(figsize=(7, 7))
+        plt.scatter(y.real, y.imag, color='blue', marker='x', label="Noisy Symbols")
+        plt.scatter(complexSignal.real, complexSignal.imag, color='red', marker='o', label="Original QPSK Symbols", s = 35)
+        plt.axhline(0, color='black', linestyle='--', linewidth=0.5)
+        plt.axvline(0, color='black', linestyle='--', linewidth=0.5)
+        plt.grid(True, linestyle='--', linewidth=0.5)
+        plt.xlabel("Imaginary")
+        plt.ylabel("Real")
+        plt.title(f"QPSK Constellation with AWGN (SNR = {SNR_DB} dB)")
+        plt.legend()
+        plt.show()
 
 
     def raw(self, codeword):
+
         hardDecisions = []
         for val in codeword:
             if(val < 0 ):
@@ -310,51 +398,33 @@ class LDPCEncoder():
         with open(filePath, "a") as file:
             file.write(f"{time.ctime()}: SNR = {SNR}, MinSum={BER}, SumProd{sumProd}, BitFlip{bitFlip}\n")
 
-    def spreadDSS(self, spreadFactor, snr, symbols=[0]):
-        if len(symbols) == 1:
-            self.PN = numpy.random.randint(0,2, size=spreadFactor)
-            finalSpread = []
-            # print(f"Pseudo-Random Noise Code: {self.PN}")
-            for bit in self.originalEncoded:
-                result = [A^bit for A in self.PN]
-                finalSpread.append(result)
-            # print(f"Final {numpy.array(finalSpread)}")
-            self.spread = numpy.array(finalSpread)
-            finalSpread = numpy.array(finalSpread)
-            print(f"sprad {spreadFactor}")
-            noisy = self.addNoiseBPSK(self.SNR, finalSpread, False)
-            return noisy
-        #QAM Modulation
-        else:
-            #(±1 values for real & imaginary parts)
-            
-            self.PN = numpy.random.choice([-1, 1], size=spreadFactor)
-            spread_signal = []
-            for symbol in symbols:
-                spread_symbol = [symbol * pn for pn in self.PN]  # Multiply by PN sequence
-                spread_signal.extend(spread_symbol)  
-            print(f"Length of spread signal for sf: {spreadFactor}, len={len(spread_signal)}")
-            print(f"Spread signal {spread_signal[:3]}")
-            return numpy.array(spread_signal)  # Return spread QAM symbols
-        
-    def deSpreadDSS(self, noisy, spreadFactor, M):
-   
-        despreadSymbols = []
-        if M == 2:
-            for spreadBitSequence in noisy:
-                xorResult = [bit * (1 if pnBit == 1 else -1) for bit, pnBit in zip(spreadBitSequence, self.PN)]
-                softValue = sum(xorResult)  
-                
-                despreadSymbols.append(softValue)
-        else:
-            for i in range(0, len(noisy), spreadFactor):
-                despread = sum(noisy[i:i+spreadFactor] * self.PN) / spreadFactor  
-                despreadSymbols.append(despread)  
+    def spreadDSS(self, spreadFactor, snr):
+        self.PN = numpy.random.randint(0,2, size=spreadFactor)
+        finalSpread = []
+        # print(f"Pseudo-Random Noise Code: {self.PN}")
+        for bit in self.originalEncoded:
+            result = [A^bit for A in self.PN]
+            finalSpread.append(result)
+        # print(f"Final {numpy.array(finalSpread)}")
+        self.spread = numpy.array(finalSpread)
+        finalSpread = numpy.array(finalSpread)
+        noisy = self.addNoiseBPSK(self.SNR, finalSpread, False)
+        return noisy
+    
+    def deSpreadDSS(self, noisy):
+        despreadSoftBits = []
 
-        print(f"Despread: {numpy.array(despreadSymbols)}")
-        print(len(despreadSymbols))
-        return numpy.array(despreadSymbols) 
+        for spreadBitSequence in noisy:
+            xorResult = [bit * (1 if pnBit == 1 else -1) for bit, pnBit in zip(spreadBitSequence, self.PN)]
+            softValue = sum(xorResult)  
             
+            despreadSoftBits.append(softValue)
+
+        return numpy.array(despreadSoftBits)  
+
+
+
+        
 
 
 def readMatrix(filePath):
@@ -373,42 +443,39 @@ def readMatrix(filePath):
         file.write(f"G: {G}\n")
 
     return H, G  # Return both matrices
+def readMatrixFile(filePath):
+    matrix = scipy.io.loadmat(filePath)
+    return matrix
 
-# numpy.random.seed(42)
+
 #  Expected Noise Std: 0.7071067811865476, Measured Noise Std: 1.0
-numpy.random.seed(42)
-Test = LDPCEncoder(4,8,648, readDataMatrix=True)
+numpy.random.seed(1)
+Test = LDPCEncoder(4,5,2000, readDataMatrix=True)
 def test(snr):
-
     # DSSS Result
-    message = numpy.random.randint(0,2,size=324)
-    print(message)
-    symbols = Test.encode(message, snr, 4)
-    # print(f"Original encded {Test.originalEncoded}")
-    noisy = Test.spreadDSS(4, snr, symbols)
-    # print(f"Result of spread {noisy}")
-    demodulated = Test.deSpreadDSS(noisy, 4, 4)
- 
-    print(F"Spread Result {Test.minSumDecode(demodulated, 4)}")
+    print("Starting test...")
+    message = numpy.random.randint(0,2,size=400)
+    nonSpread = Test.encode(message, snr)
+    print(F"Codeword checK: {Test.isValidCodeword(Test.originalEncoded)}")
+    noisy = Test.spreadDSS(4, 0)
+    codeword = Test.deSpreadDSS(noisy)
+    # sumProdEncode = pyldpc.encode(Test.G, message, snr
+    print(F"Spread Result {Test.minSumDecode(nonSpread)}")
+    # print(F"Spread Result {pyldpc.decode(Test.H, sumProdEncode, snr, 30)}")
 
     #Non-DSSS
     # print(F"Non-Spread Result {Test.minSumDecode(nonSpread)}")
-
+test(1)
 # numpy.random.seed(21)
-test(5)
-# it = 1
-# while test(-2) != FRAME_ERROR:
-#     it +=1
-# print(it)
 """RATE 1/2"""
 test0 = LDPCEncoder(2,4, 64)
 message0 = numpy.random.randint(0, 2, size=541).tolist()  
 
 
-""""BENCHMARK R=1/2"""
+""""RATE 3/4"""
 
 # test1 = LDPCEncoder(4,8, 648, readDataMatrix=True)
-test1 = LDPCEncoder(4,8,648, readDataMatrix=True)
+test1 = LDPCEncoder(4,5,2000, readDataMatrix=False)
 # test1 = LDPCEncoder(2,4, 64, readDataMatrix=False)
 message1 = numpy.random.randint(0, 2, size=329).tolist()  
 
@@ -564,12 +631,10 @@ def plotRates():
 
 
     plt.figure(figsize=(8, 5))
-    plt.yscale("log")  # Set the Y-axis to logarithmic scale
+    plt.yscale("log") 
 
-    #plt.plot(snrRange, highBEROut, 'b-', label="R = 5/6")
-    #plt.plot(snrRange, threeQuarterBEROut, 'g-', label="R = 3/4")
     plt.plot(snrRange, halfBEROut, 'r-', label="R = 1/2")
-    #plt.plot(snrRange, quarterBEROut, 'y-', label="R = 1/4")
+
 
     plt.xlabel("SNR (dB)")
     plt.ylabel("Bit Error Rate (BER)")
@@ -580,51 +645,9 @@ def plotRates():
 
     plt.show()
 
-
-# def plotFrameError(minSum=True, sumProd=False, bitFlip=False, readMatrixFile=False):
-#     snrRange = numpy.arange(-2, 4, 1)
-#     BEROut = []
-    
-#     totalFrameErrors = []
-#     sumProdBEROut = []
-#     bitFlipBEROut = []
-#     maxErrors = 50
-#     for snr in snrRange:
-#         avgBER = 0
-#         avgSumProdBER = 0
-#         avgBitFlipBER = 0
-#         frameErrors = 0
-#         iterations = 0
-#         while frameErrors < maxErrors:
-#             print(f"Iteration No. {iterations}, SNR: {snr}, Frame Errors: {frameErrors}")
-#             iterations += 1
-#             message1 = numpy.random.randint(0, 2, size=325).tolist()  
-#             test1.encode(message1)
-#             BER = test1.minSumDecode(test1.addNoiseBPSK(snr))
-#             if BER is FRAME_ERROR:
-#                 frameErrors += 1
-#             if iterations > 1000:
-#                 frameErrors = 0
-#                 break
-        
-#         totalFrameErrors.append(frameErrors/iterations)
-
-
-#         # test1.write("results2.txt", snr, avgBER/n, avgSumProdBER/5.5,avgBitFlipBER/n )
-#     plt.figure(figsize=(8, 5))
-#     plt.semilogy(snrRange, totalFrameErrors, marker='o', linestyle='-')  
-#     plt.xlabel("SNR (dB)")
-#     plt.ylabel("Frame Error Rate")
-#     plt.title("LDPC Bit-Flip Decoding: Frame Error vs. SNR at 1/4 Data Rate, n= 256, BPSK")
-#     plt.grid(True, which="both", linestyle="--")
-#     plt.show()
-# plotRates()
-
-# test0.H, test0.G = readMatrix("parityMatrix.txt")
-
 def plotFrameError(minSum=True, sumProd=False, bitFlip=False, readMatrixFile=False):
     print("Begin frame error plot")
-    snrRange = numpy.array([-8, -7, -6.8, -6.6, -6.4, -6.2, -6, -5, -3])
+    snrRange = numpy.array([-4,-2,-1.8,-1.6,-1.4,-1.2 -1])
 
     # snrRange = numpy.arange(-8, -3, 0.1)
     BEROut = []
@@ -632,7 +655,7 @@ def plotFrameError(minSum=True, sumProd=False, bitFlip=False, readMatrixFile=Fal
     totalFrameErrors = []
     sumProdBEROut = []
     bitFlipBEROut = []
-    maxErrors = 1000
+    maxErrors = 75
     
     for snr in snrRange:
         avgBER = []
@@ -645,14 +668,12 @@ def plotFrameError(minSum=True, sumProd=False, bitFlip=False, readMatrixFile=Fal
             iterations += 1
             os.system("clear")
             print(f"Iteration No. {iterations}, SNR: {snr}, Frame Errors: {frameErrors}, FER {frameErrors/iterations}")
+            message1 = numpy.random.randint(0, 2, size=403).tolist()  
             
-            message1 = numpy.random.randint(0, 2, size=324).tolist()  
-            
-            test1.encode(message1, snr)
+            noist = test1.encode(message1, snr)
             noisy = test1.spreadDSS(4, snr)
             codeword = test1.deSpreadDSS(noisy)
-            BER =  test1.minSumDecode(codeword)
-            print(f"Raw result: {test1.raw(codeword)}")
+            BER =  test1.minSumDecode(noist)
             if BER != FRAME_ERROR:
                 BERS.append(BER)
 
@@ -660,7 +681,7 @@ def plotFrameError(minSum=True, sumProd=False, bitFlip=False, readMatrixFile=Fal
             if BER is  FRAME_ERROR:
                 BERS.append(1)
                 frameErrors += 1
-            if iterations > 12000:
+            if iterations > 2000:
                 frameErrors = 0
                 break
         
@@ -668,14 +689,14 @@ def plotFrameError(minSum=True, sumProd=False, bitFlip=False, readMatrixFile=Fal
 
 
         # test1.write("results2.txt", snr, avgBER/n, avgSumProdBER/5.5,avgBitFlipBER/n )
+    print(f"Total frame errors: {totalFrameErrors}")
     plt.figure(figsize=(8, 5))
     plt.semilogy(snrRange, totalFrameErrors, marker='o', linestyle='-')  
     plt.xlabel("SNR (dB)")
+    
     plt.ylabel("Frame Error Rate")
-    plt.title("LDPC short block DSSS: Frame Error vs. SNR at 1/2 Data Rate, n= 6480, BPSK")
+    plt.title("Structured LPDC. Frame Error vs. SNR at 1/5 Data Rate, n= 2000")
     plt.grid(True, which="both", linestyle="--")
     
     plt.show() 
-# plotRates()
-
-
+# plotFrameError()

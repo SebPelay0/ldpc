@@ -5,7 +5,8 @@ class Turbo:
         self.g2 = g2
         self.codeword = codeword
     def encode(self):
-        
+        messageBits = numpy.array(self.codeword)
+        firstEncoder = 
     def calculateParities(self, generator):
         parities = []
         shiftRegister = [0] * len(generator) #initialise to all zeroes
@@ -16,6 +17,8 @@ class Turbo:
             shiftRegister.insert(0, val)
             parityBit = sum([shiftRegister[i] for i in checkBits]) % 2
             parities.append(parityBit)
+
+        return parities
 
 
     def interleave(self)
