@@ -437,7 +437,7 @@ class LDPCEncoder():
     
         BER = 0
         errors = 0
-        while numIterations < 40:
+        while numIterations < 50:
             self.numIterations = numIterations
             errors = np.sum(np.array(self.originalEncoded) != np.array(hardDecisions))
             print(f"Decoding Iteration {numIterations}: BER {errors/len(bitNodes)}")
@@ -462,7 +462,8 @@ class LDPCEncoder():
 
                     tanhValues = np.array([np.tanh(M/2) for M in incoming])
                     tanhProd = np.prod(tanhValues)
-                    E[j][target] = 2*np.arctanh(tanhProd)
+                    tanhProd = np.clip(tanhProd,-0.99999, 0.99999)
+                    E[j][target] = 0.85* 2*np.arctanh(tanhProd)
                     
         
                 # bitNodes[i] = numpy.clip(bitNodes[i], -100.0, 100.0)
@@ -632,7 +633,7 @@ def test(snr):
     codeword = Test.deSpreadDSS(noisy)
     # sumProdEncode = pyldpc.encode(Test.G, message, snr
     # print(F"Min Sum Result {Test.minSumDecode(nonSpread)}")
-    print(F"Sum Product Result {Test.sumProductDecode(nonSpread)}")
+    print(F"Sum Product Result {Test.sumProductDecodeTest(nonSpread)}")
     # print(F"Spread Result {pyldpc.decode(Test.H, sumProdEncode, snr, 30)}")
 
     #Non-DSSS
@@ -819,7 +820,7 @@ def plotRates():
 
 def plotFrameError(minSum=True, sumProd=False, bitFlip=False, readMatrixFile=False):
     print("Begin frame error plot")
-    snrRange = np.array([-2.7])
+    snrRange = np.array([-3.3])
 
     # snrRange = numpy.arange(-8, -3, 0.1)
     BEROut = []
@@ -845,7 +846,7 @@ def plotFrameError(minSum=True, sumProd=False, bitFlip=False, readMatrixFile=Fal
             noist = test1.encode(message1, snr)
             # noisy = test1.spreadDSS(4, snr)
             # codeword = test1.deSpreadDSS(noisy)
-            BER =  test1.sumProductDecode(noist)
+            BER =  test1.sumProductDecodeTest(noist)
             if BER != FRAME_ERROR:
                 BERS.append(BER)
 
