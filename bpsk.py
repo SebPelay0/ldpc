@@ -12,6 +12,16 @@ sys.path.append(os.path.abspath("../pyldpc"))
 import pyldpc
 # numpy.random.seed(29)
 # H,G = pyldpc.make_ldpc(8,2, 4,True,True)
+
+# Decoding Iteration 12: BER 0.0014423076923076924
+# Decoding Iteration 13: BER 0.0004807692307692308
+# Decoding Iteration 14: BER 0.0004807692307692308
+# Decoding Iteration 15: BER 0.0004807692307692308
+# Decoding Iteration 16: BER 0.0004807692307692308
+# Decoding Iteration 17: BER 0.0004807692307692308
+# Decoding Iteration 18: BER 0.0004807692307692308
+# Decoding Iteration 19: BER 0.0004807692307692308
+# Decoding Iteration 20: BER 0.0004807692307692308
 FRAME_ERROR = None
 
 class LDPCEncoder():
@@ -472,13 +482,15 @@ class LDPCEncoder():
             for i in range(self.n):
                 for j in np.where(self.H[:, i] == 1)[0]:
                     other_checks = [k for k in np.where(self.H[:, i] == 1)[0] if k != j]
-                    M[i][j] = initialLLRs[i] + sum(E[k][i] for k in other_checks)
+                    M[i][j] = 0.95* (initialLLRs[i] + sum(E[k][i] for k in other_checks))
             
             #Calculate LLR total for the variable node
             for i in range(len(bitNodes)):
                 incoming_checks = np.where(self.H[:, i] == 1)[0]
                 bitNodes[i] = initialLLRs[i] + sum(E[j][i] for j in incoming_checks)
-            bitNodes = np.clip(bitNodes, -500, 500)
+                
+            # print(f"Iteration {numIterations}: bitNodes {bitNodes[0:10]}")
+            bitNodes = np.clip(bitNodes, -50, 50)
 
             #Hard decision on each variable node. 
             for i in range(len(bitNodes)):
@@ -820,7 +832,7 @@ def plotRates():
 
 def plotFrameError(minSum=True, sumProd=False, bitFlip=False, readMatrixFile=False):
     print("Begin frame error plot")
-    snrRange = np.array([-3.3])
+    snrRange = np.array([-4, -3.5, -3,-2.8, -2.6, -2.4])
 
     # snrRange = numpy.arange(-8, -3, 0.1)
     BEROut = []
@@ -828,7 +840,7 @@ def plotFrameError(minSum=True, sumProd=False, bitFlip=False, readMatrixFile=Fal
     totalFrameErrors = []
     sumProdBEROut = []
     bitFlipBEROut = []
-    maxErrors = 750
+    maxErrors = 75
     
     for snr in snrRange:
         avgBER = []
@@ -841,6 +853,7 @@ def plotFrameError(minSum=True, sumProd=False, bitFlip=False, readMatrixFile=Fal
             iterations += 1
             os.system("cls")
             print(f"Iteration No. {iterations}, SNR: {snr}, Frame Errors: {frameErrors}, FER {frameErrors/iterations}")
+            print(f"SNR RANGE: {snrRange}")
             message1 = np.random.randint(0, 2, size=400).tolist()  
             
             noist = test1.encode(message1, snr)
@@ -857,20 +870,21 @@ def plotFrameError(minSum=True, sumProd=False, bitFlip=False, readMatrixFile=Fal
             if iterations > 1000:
                 # frameErrors = 0
                 break
-            if iterations == 350 and frameErrors == 0:
+            if iterations == 200 and frameErrors == 0:
                 break
         
         totalFrameErrors.append(frameErrors/iterations)
 
 
         # test1.write("results2.txt", snr, avgBER/n, avgSumProdBER/5.5,avgBitFlipBER/n )
+    print(f"SNRS: {snrRange}")
     print(f"Total frame errors: {totalFrameErrors}")
     plt.figure(figsize=(8, 5))
     plt.semilogy(snrRange, totalFrameErrors, marker='o', linestyle='-')  
     plt.xlabel("SNR (dB)")
     
     plt.ylabel("Frame Error Rate")
-    plt.title("5G LDPC Frame Error vs. SNR at 1/3 Data Rate, n= 2000, z = 80")
+    plt.title("Sum Product 5G LDPC Frame Error vs. SNR at 1/5 Data Rate, n= 2000, z = 80")
     plt.grid(True, which="both", linestyle="--")
     
     plt.show() 
