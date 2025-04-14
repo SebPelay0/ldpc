@@ -329,28 +329,28 @@ class LDPCEncoder():
                     # Get valid messages bits to this check
                     incoming = [M[k][j] for k in others]
 
-                    # tanhValues = np.array([np.tanh(M/2) for M in incoming])
-                    tanhValues = np.tanh(np.clip(np.array(incoming)/2, -20, 20))
+                    tanhValues = np.array([np.tanh(M/2) for M in incoming])
+                    # tanhValues = np.tanh(np.clip(np.array(incoming)/2, -20, 20))
 
                     tanhProd = np.prod(tanhValues)
-                    tanhProd = np.clip(tanhProd,-0.9999999999999, 0.9999999999999)
-                    # E[j][target] = 2*np.arctanh(tanhProd)
-                    E[j][target] = np.clip(2*np.arctanh(tanhProd), -50, 50)
+                    tanhProd = np.clip(tanhProd,-0.999999999999999, 0.999999999999999)
+                    E[j][target] = 2*np.arctanh(tanhProd)
+                    # E[j][target] = np.clip(2*np.arctanh(tanhProd), -50, 50)
 
         
                 # bitNodes[i] = numpy.clip(bitNodes[i], -100.0, 100.0)
             
             #Set new variable node messages, excluding each check node's own contribution
-            # if numIterations < 7:
-            #     damping = 0.9
-            # if numIterations > 7 and numIterations< 20:
-            #     damping = 0.5
-            # if numIterations > 20:
-            #     damping = 0.2
+            if numIterations < 7:
+                damping = 0.9
+            if numIterations > 7 and numIterations< 20:
+                damping = 0.5
+            if numIterations > 20:
+                damping = 0.2
 
-            # if numIterations > 40:
-            #     damping = 0.01
-            damping = 0.2
+            if numIterations > 40:
+                damping = 0.01
+            
             for i in range(self.n):
                 for j in np.where(self.H[:, i] == 1)[0]:
                     otherChecks = [k for k in np.where(self.H[:, i] == 1)[0] if k != j]
@@ -367,7 +367,7 @@ class LDPCEncoder():
             reliability_boost = 1.5
             bitNodes = np.where(np.abs(bitNodes) > conf_thresh, bitNodes * reliability_boost, bitNodes)
 
-            bitNodes = np.clip(bitNodes, -30, 30)
+            # bitNodes = np.clip(bitNodes, -30, 30)
 
             #Hard decision on each variable node. 
             for i in range(len(bitNodes)):
@@ -381,6 +381,7 @@ class LDPCEncoder():
         errors = np.sum(np.array(self.originalEncoded) != np.array(hardDecisions))
         BER = errors/len(bitNodes) 
         print(f"Decoding Failed, Best Guess - BER: {BER}, SNR {self.SNR}, Eb/No {self.bitEnergyRatio}")
+
         self.messageDecoded = bitNodes
         self.BER = BER
         
@@ -398,7 +399,6 @@ class LDPCEncoder():
         
         bpsk = 2 * np.array(encoded) - 1  # Convert to -1 and 1
 
-    
         y = bpsk + noise
         self.SNR = SNR_DB
         self.y = y
@@ -525,7 +525,7 @@ def test(snr):
 
     #Non-DSSS
     # print(F"Non-Spread Result {Test.minSumDecode(nonSpread)}")
-test(-3.3)
+# test(-3.3)
 
 # numpy.random.seed(21)
 """RATE 1/2"""
