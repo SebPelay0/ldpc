@@ -33,7 +33,7 @@ class LDPCEncoder():
         self.PN = None
         if readDataMatrix:
             # H,G = readMatrix("parityMatrix.txt")
-            H = np.array(readMatrixFile("5GMatrix.mat")["H"], dtype=int)
+            H = np.array(readMatrixFile("Matrices/5GMatrix.mat")["H"], dtype=int)
             # H = H[:1080,:] #HALF RATE  ROW REMOVAl
             G = pyldpc.coding_matrix(H)
             self.H = H
@@ -171,6 +171,7 @@ class LDPCEncoder():
         # Initialize bit nodes with the channel LLRs
         for j in range(int(self.m)):
             for i in np.where(self.H[j] == 1)[0]:
+            
                 if i not in M:
                     M[i] = {}
                 M[i][j] = initialLLRs[i]
@@ -259,148 +260,6 @@ class LDPCEncoder():
         return FRAME_ERROR
     
 
-    def sumProductDecode(self, codeword):
-        # codeword = -1  * codeword
-        # print(f"Codeword: {self.originalEncoded.flatten()}")
-        bitNodes = np.array(codeword, dtype=float)  # Use soft channel valus instead of hard bits]
-        
-        initialLLRs = []
-        numIterations = 0
-        # Estimate A Priori LLR's for each bit. 
-        for index in range(len(codeword)):
-            sigma2 = 1 / (2 *  (10**(self.SNR / 10))) 
-            if index < 80:
-                initialLLRs.append(0.0)
-            else:
-                LLR = (2 * float(codeword[index])) / sigma2
-                initialLLRs.append(LLR)
-        
-        # M=> Bit-to-check messages
-        M = {}  
-        # Initialize bit nodes with the channel LLRs
-        for j in range(int(self.m)):
-            for i in np.where(self.H[j] == 1)[0]:
-                if i not in M:
-                    M[i] = {}
-                M[i][j] = initialLLRs[i]
-        
-        # for i in range(self.n):
-        #     for j in numpy.where(self.H[:, i] == 1)[0]:
-        #         M[i][j] = initialLLRs[i]
-
-        #E => Check to bit messages
-        E = {j: {} for j in range(int(self.m))}
-
-     
-
-        # # Initialize check-to-bit messages
-        
-        initialLLRs = np.array(initialLLRs, dtype=float)
-        bitNodes = initialLLRs.copy()
-        hardDecisions = [0]*len(bitNodes)
-        for i in range(len(bitNodes)):
-                if bitNodes[i] > 0:
-                    hardDecisions[i] = 0
-                else: hardDecisions[i] = 1
-    
-        BER = 0
-        errors = 0
-        while numIterations < 40:
-            self.numIterations = numIterations
-            errors = np.sum(np.array(self.originalEncoded) != np.array(hardDecisions))
-            print(f"Decoding Iteration {numIterations}: BER {errors/len(bitNodes)}")
-            #Test the hard decision on current soft values
-            if self.isValidCodeword(np.array(hardDecisions)):
-                errors = np.sum(np.array(self.originalEncoded) != np.array(hardDecisions))
-                print(f"Sum Product Decoding done after {numIterations} Iterations, BER {errors/len(bitNodes)}")
-                self.messageDecoded = hardDecisions
-                return errors/len(bitNodes)
-
-            messagesReceivedByBits = np.zeros(len(bitNodes)) 
-
-            for j in range(int(self.m)):  
-                Ej = np.where(self.H[j] == 1)[0]  # All bits connected to check j
-
-                for target in Ej:
-                    # Use all other bits except the target
-                    others = [k for k in Ej if k != target]
-
-                    # Get valid messages bits to this check
-                    incoming = [M[k][j] for k in others]
-
-                    #Separate into bit values and reliability
-                    signs = []
-                    magnitudes = []
-                    for val in incoming:
-                        magnitudes.append(np.abs(val))
-                        if val == 0 or val ==1e-9:
-                            signs.append(1)
-                        else:
-                            signs.append(np.sign(val))
-                    
-                    # tanhValues = numpy.array([numpy.tanh(M/2) for M in magnitudes])
-                    magnitudes = np.array(magnitudes)
-                    signs = np.array(signs)
-
-                    #Calculate product series
-                    # product =numpy.prod(signs) * numpy.prod(magnitudes)
-                    
-                    #message formula
-                    phiSum = np.sum(self.phi(magnitudes)) #apply all phi(x)^-1=y on all magnitudes and take sum
-                    phiSum = np.clip(phiSum, 1e-12, 20)
-                    phiMagnitude = self.phi(phiSum)
-                    # if phiSum <0:
-                    #     print(f"phi sum {phiSum}")s
-                    E[j][target] = np.prod(signs) * phiMagnitude
-                    
-        
-                # bitNodes[i] = numpy.clip(bitNodes[i], -100.0, 100.0)
-            
-            #Set new variable node messages, excluding each check node's own contribution
-            for i in range(self.n):
-                for j in np.where(self.H[:, i] == 1)[0]:
-                    other_checks = [k for k in np.where(self.H[:, i] == 1)[0] if k != j]
-                    M[i][j] = initialLLRs[i] + sum(E[k][i] for k in other_checks)
-            
-            #Calculate LLR total for the variable node
-            for i in range(len(bitNodes)):
-                incoming_checks = np.where(self.H[:, i] == 1)[0]
-                bitNodes[i] = initialLLRs[i] + sum(E[j][i] for j in incoming_checks)
-            bitNodes = np.clip(bitNodes, -500, 500)
-
-            #Hard decision on each variable node. 
-            for i in range(len(bitNodes)):
-                if bitNodes[i] > 0:
-                    hardDecisions[i] = 0
-                else: hardDecisions[i] = 1
-     
-            numIterations += 1
-        
-        
-        errors = np.sum(np.array(self.originalEncoded) != np.array(hardDecisions))
-        BER = errors/len(bitNodes) 
-        print(f"Decoding Failed, Best Guess - BER: {BER}, SNR {self.SNR}, Eb/No {self.bitEnergyRatio}")
-        self.messageDecoded = bitNodes
-        self.BER = BER
-        
-        errors_mask = (np.array(self.originalEncoded) != np.array(hardDecisions)).astype(int)
-        error_indices = np.where(errors_mask == 1)[0]
-
-        
-
-        return FRAME_ERROR
-    
-
-    def phi(self, x):
-        #Log approximation of tanh(x)
-        # if x == 0:
-        #     x = 1e-7
-        x = np.clip(x, 1e-12,100)
-        # return -numpy.log(numpy.tanh(x/2))
-        return np.log((np.exp(x)+ 1)/(np.exp(x) -1))
-
-    
-
     def sumProductDecodeTest(self, codeword):
         # codeword = -1  * codeword
         # print(f"Codeword: {self.originalEncoded.flatten()}")
@@ -412,7 +271,7 @@ class LDPCEncoder():
         for index in range(len(codeword)):
             sigma2 = 1 / (2 *  (10**(self.SNR / 10))) 
             if index < 80:
-                initialLLRs.append(0.0)
+                initialLLRs.append(0)
             else:
                 LLR = (2 * float(codeword[index])) / sigma2
                 initialLLRs.append(LLR)
@@ -470,19 +329,33 @@ class LDPCEncoder():
                     # Get valid messages bits to this check
                     incoming = [M[k][j] for k in others]
 
-                    tanhValues = np.array([np.tanh(M/2) for M in incoming])
+                    # tanhValues = np.array([np.tanh(M/2) for M in incoming])
+                    tanhValues = np.tanh(np.clip(np.array(incoming)/2, -20, 20))
+
                     tanhProd = np.prod(tanhValues)
-                    tanhProd = np.clip(tanhProd,-0.99999, 0.99999)
-                    E[j][target] = 0.85* 2*np.arctanh(tanhProd)
-                    
+                    tanhProd = np.clip(tanhProd,-0.9999999999999, 0.9999999999999)
+                    # E[j][target] = 2*np.arctanh(tanhProd)
+                    E[j][target] = np.clip(2*np.arctanh(tanhProd), -50, 50)
+
         
                 # bitNodes[i] = numpy.clip(bitNodes[i], -100.0, 100.0)
             
             #Set new variable node messages, excluding each check node's own contribution
+            # if numIterations < 7:
+            #     damping = 0.9
+            # if numIterations > 7 and numIterations< 20:
+            #     damping = 0.5
+            # if numIterations > 20:
+            #     damping = 0.2
+
+            # if numIterations > 40:
+            #     damping = 0.01
+            damping = 0.2
             for i in range(self.n):
                 for j in np.where(self.H[:, i] == 1)[0]:
-                    other_checks = [k for k in np.where(self.H[:, i] == 1)[0] if k != j]
-                    M[i][j] = 0.95* (initialLLRs[i] + sum(E[k][i] for k in other_checks))
+                    otherChecks = [k for k in np.where(self.H[:, i] == 1)[0] if k != j]
+                    newMsg = initialLLRs[i] + sum(E[k][i] for k in otherChecks)
+                    M[i][j] = damping * M[i][j] + (1 - damping) * newMsg
             
             #Calculate LLR total for the variable node
             for i in range(len(bitNodes)):
@@ -490,7 +363,11 @@ class LDPCEncoder():
                 bitNodes[i] = initialLLRs[i] + sum(E[j][i] for j in incoming_checks)
                 
             # print(f"Iteration {numIterations}: bitNodes {bitNodes[0:10]}")
-            bitNodes = np.clip(bitNodes, -50, 50)
+            conf_thresh = 5
+            reliability_boost = 1.5
+            bitNodes = np.where(np.abs(bitNodes) > conf_thresh, bitNodes * reliability_boost, bitNodes)
+
+            bitNodes = np.clip(bitNodes, -30, 30)
 
             #Hard decision on each variable node. 
             for i in range(len(bitNodes)):
@@ -509,8 +386,6 @@ class LDPCEncoder():
         
         errors_mask = (np.array(self.originalEncoded) != np.array(hardDecisions)).astype(int)
         error_indices = np.where(errors_mask == 1)[0]
-
-        
 
         return FRAME_ERROR
     
@@ -638,7 +513,7 @@ Test = LDPCEncoder(4,5,2000, readDataMatrix=True)
 def test(snr):
     # DSSS Result
     np.random.seed(12)
-    print("Starting test...")
+    print(f"Starting test SNR = {snr} ")
     message = np.random.randint(0, 2, size=400)
     nonSpread = Test.encode(message, snr)
     noisy = Test.spreadDSS(4, 0)
@@ -650,7 +525,8 @@ def test(snr):
 
     #Non-DSSS
     # print(F"Non-Spread Result {Test.minSumDecode(nonSpread)}")
-test(-3.5)
+test(-3.3)
+
 # numpy.random.seed(21)
 """RATE 1/2"""
 test0 = LDPCEncoder(2,4, 64)
@@ -769,7 +645,7 @@ def plot(minSum=True, sumProd=False, bitFlip=False, readMatrixFile=False):
     
 
 def plotRates():
-    snrRange = np.arange(-4, 4, 1)
+    snrRange = np.arange(-3.5, -3, -2.5,-2)
     BEROut = []
     
     highBEROut = []
@@ -832,7 +708,7 @@ def plotRates():
 
 def plotFrameError(minSum=True, sumProd=False, bitFlip=False, readMatrixFile=False):
     print("Begin frame error plot")
-    snrRange = np.array([-4, -3.5, -3,-2.8, -2.6, -2.4])
+    snrRange = np.array([-3.3])
 
     # snrRange = numpy.arange(-8, -3, 0.1)
     BEROut = []
@@ -851,7 +727,7 @@ def plotFrameError(minSum=True, sumProd=False, bitFlip=False, readMatrixFile=Fal
         BERS = [0]
         while frameErrors < maxErrors:
             iterations += 1
-            os.system("cls")
+            os.system("clear")
             print(f"Iteration No. {iterations}, SNR: {snr}, Frame Errors: {frameErrors}, FER {frameErrors/iterations}")
             print(f"SNR RANGE: {snrRange}")
             message1 = np.random.randint(0, 2, size=400).tolist()  
@@ -867,7 +743,7 @@ def plotFrameError(minSum=True, sumProd=False, bitFlip=False, readMatrixFile=Fal
             if BER is  FRAME_ERROR:
                 BERS.append(1)
                 frameErrors += 1
-            if iterations > 1000:
+            if iterations > 100 or frameErrors > 30:
                 # frameErrors = 0
                 break
             if iterations == 200 and frameErrors == 0:
@@ -888,4 +764,6 @@ def plotFrameError(minSum=True, sumProd=False, bitFlip=False, readMatrixFile=Fal
     plt.grid(True, which="both", linestyle="--")
     
     plt.show() 
+# plotFrameError()
+
 plotFrameError()
