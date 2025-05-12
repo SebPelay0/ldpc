@@ -473,54 +473,6 @@ class LDPCEncoder():
 
         return np.array(despreadSoftBits)
 
-    def pad_bits_to_symbols(self, bits, symbol_size=6):
-        pad_len = (-len(bits)) % symbol_size
-        padded = np.concatenate([bits, np.zeros(pad_len, dtype=int)])
-        return padded
-
-    def split_to_symbols(self, bits, symbol_size=6):
-        bits = self.pad_bits_to_symbols(bits, symbol_size)
-        return np.array([int("".join(map(str, bits[i:i+symbol_size])), 2)
-                        for i in range(0, len(bits), symbol_size)], dtype=np.uint8)
-
-    def flatten_symbols_to_bits(self, symbols, symbol_size=6):
-        bits = []
-        for s in symbols:
-            for i in reversed(range(symbol_size)):
-                bits.append((s >> i) & 1)
-        return np.array(bits[:-(len(bits) % symbol_size) or None], dtype=np.uint8)
-    
-    def run_nb_ldpc_decoder(self, bitstream, H_idx, H_ele, m, n):
-        nb.init_table()
-        padded = self.pad_bits_to_symbols(bitstream)
-        decoded, nerr = nb.decode_NB_LDPC(H_idx, H_ele, m, n, padded)
-        return decoded, nerr
-    def load_nb_ldpc_matrix(self, filepath):
-        with open(filepath, "r") as f:
-            lines = f.readlines()
-        
-        H_idx = []
-        H_ele = []
-
-        for line in lines:
-            line = line.replace(";", "")  # Remove any semicolons
-            entries = list(map(int, line.strip().split()))
-            
-            idx_row = []
-            ele_row = []
-            for j, val in enumerate(entries):
-                if val != -1:
-                    idx_row.append(j)
-                    ele_row.append(val)
-            H_idx.append(idx_row)
-            H_ele.append(ele_row)
-
-        m = len(H_idx)
-        n = max(max(row, default=-1) for row in H_idx) + 1
-        return H_idx, H_ele, m, n
-
-
-     
 
 
 def readMatrix(filePath):
@@ -553,10 +505,7 @@ def test(snr):
     print(f"Starting test SNR = {snr} ")
     message = np.random.randint(0, 2, size=324)
     nonSpread = Test.encode(message, snr)
-    noisy = Test.spreadDSS(4, 0)
-    codeword = Test.deSpreadDSS(noisy)
-    # sumProdEncode = pyldpc.encode(Test.G, message, snr
-    # print(F"Min Sum Result {Test.minSumDecode(nonSpread)}")
+    
     print(F"Sum Product Result {Test.sumProductDecodeTest(nonSpread)}")
     # print(F"Spread Result {pyldpc.decode(Test.H, sumProdEncode, snr, 30)}")
 
