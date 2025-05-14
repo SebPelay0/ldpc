@@ -136,7 +136,7 @@ def getDistribution(frames, single =False):
     return received
 
 
-def plotFrameDistribution(symbols, baseDirPath, interpolated, save=True):
+def plotFrameDistribution(symbols, baseDirPath, interpolated, save=False):
     folderName = baseDirPath.split("/")[-1]
     
     # print(baseDirPath.split("/")[-1])
@@ -282,20 +282,36 @@ def plotFrameDistribution(symbols, baseDirPath, interpolated, save=True):
 
 import numpy as np
 import matplotlib.pyplot as plt
-
 def printErrorsWithinFrame(frames, symbol):
     errors = []
+    magnitudes = []
+    error_magnitudes = []
+
     combinedFrame = np.concatenate(frames)
     frame_lengths = [len(f) for f in frames]
     frame_ends = np.cumsum(frame_lengths)[:-1]
 
-    # Determine symbol error
     for point in combinedFrame:
+        # Determine if correct
         if symbol == "00":
-            errors.append(0 if (point.real < 0 and point.imag < 0) else 1)
+            is_error = not (point.real < 0 and point.imag < 0)
         elif symbol == "01":
-            errors.append(0 if (point.real < 0 and point.imag > 0) else 1)
+            is_error = not (point.real < 0 and point.imag > 0)
+        elif symbol == "10":
+            is_error = not (point.real > 0 and point.imag < 0)
+        elif symbol == "11":
+            is_error = not (point.real > 0 and point.imag > 0)
+        else:
+            is_error = True
 
+        errors.append(int(is_error))
+        magnitudes.append(np.abs(point))
+        if is_error:
+            error_magnitudes.append(np.abs(point))
+
+    # === Error stats ===
+    numErrors = sum(errors)
+    avg_error_magnitude = np.mean(error_magnitudes) if error_magnitudes else 0
     max_burst_length = 0
     current_burst = 0
     for e in errors:
@@ -305,24 +321,18 @@ def printErrorsWithinFrame(frames, symbol):
         else:
             current_burst = 0
 
-    numErrors = sum(errors)
-
-    #burst errors
     burst_count = 0
     for i in range(1, len(errors) - 1):
         if errors[i] == 1 and (errors[i - 1] == 1 or errors[i + 1] == 1):
             burst_count += 1
 
-
-
+    # === Plot ===
     plt.figure(figsize=(12, 3))
     plt.bar(range(len(errors)), errors, color='red', edgecolor='black')
-    # plt.plot(moving_error_rate, marker='o', markersize=2, linestyle='None', color='blue', label='Moving Error Rate')
     plt.xlabel("Symbol Index")
     plt.title(f"Error Map for Transmitted Symbol '{symbol}' (Across Frames)")
     plt.ylim(-0.1, 1.1)
     plt.grid(axis='y', linestyle='--', linewidth=0.5)
-
 
     for idx, boundary in enumerate(frame_ends):
         plt.axvline(x=boundary - 0.5, color='blue', linestyle='--', linewidth=2, alpha=0.9)
@@ -331,37 +341,23 @@ def printErrorsWithinFrame(frames, symbol):
                  color='blue',
                  bbox=dict(facecolor='white', edgecolor='blue', boxstyle='round,pad=0.2', alpha=0.7))
 
-    plt.text(
-        0.99, 1.15,
-        f"Total Errors: {numErrors}",
-        transform=plt.gca().transAxes,
-        fontsize=10,
-        ha='right',
-        va='bottom',
-        bbox=dict(facecolor='white', edgecolor='black', boxstyle='round,pad=0.3')
-    )
-    plt.text(
-        0.99, 1.05,
-        f"Burst Errors: {burst_count}",
-        transform=plt.gca().transAxes,
-        fontsize=9,
-        ha='right',
-        va='bottom',
-        bbox=dict(facecolor='white', edgecolor='black', boxstyle='round,pad=0.3')
-    )
-    plt.text(
-        0.99, 0.95,
-        f"Longest Burst Length: {max_burst_length}",
-        transform=plt.gca().transAxes,
-        fontsize=9,
-        ha='right',
-        va='bottom',
-        bbox=dict(facecolor='white', edgecolor='black', boxstyle='round,pad=0.3')
-    )
+    plt.text(0.99, 1.15, f"Total Errors: {numErrors}",
+             transform=plt.gca().transAxes, fontsize=10, ha='right', va='bottom',
+             bbox=dict(facecolor='white', edgecolor='black', boxstyle='round,pad=0.3'))
+    plt.text(0.99, 1.05, f"Burst Errors: {burst_count}",
+             transform=plt.gca().transAxes, fontsize=9, ha='right', va='bottom',
+             bbox=dict(facecolor='white', edgecolor='black', boxstyle='round,pad=0.3'))
+    plt.text(0.99, 0.95, f"Longest Burst Length: {max_burst_length}",
+             transform=plt.gca().transAxes, fontsize=9, ha='right', va='bottom',
+             bbox=dict(facecolor='white', edgecolor='black', boxstyle='round,pad=0.3'))
+    plt.text(0.99, 0.85, f"Avg Error Magnitude: {avg_error_magnitude:.2f}",
+             transform=plt.gca().transAxes, fontsize=9, ha='right', va='bottom',
+             bbox=dict(facecolor='white', edgecolor='black', boxstyle='round,pad=0.3'))
 
     plt.tight_layout()
     plt.legend(loc='lower left')
     plt.show()
+
 
 files = getFiles(baseDirPath)
 for file in files:
@@ -373,13 +369,13 @@ print(symbols["00"][1])
 allFrames = []
 for i in range(0,5):
     allFrames.append(symbols["01"][i][0])
-frameTest = symbols["01"][2][0]
+frameTest = symbols["00"][2][0]
 
 printErrorsWithinFrame(allFrames, "01")
 
-received = getDistribution(symbols["00"][0])
+# received = getDistribution(symbols["00"][0])
 
-# dists = plotFrameDistribution(symbols, baseDirPath, interpolated=interpolate)
+dists = plotFrameDistribution(symbols, baseDirPath, interpolated=interpolate)
 # print(dists["00"][0].mean())
 path = "conditional constellation points/single carrier_1744853468/minus_one_minus_jone_rx_scfde_frame0.npy"
 # data = loadArray(path)
