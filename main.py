@@ -2,6 +2,8 @@ from bpsk import LDPCEncoder
 import numpy as np
 import os
 import matplotlib.pyplot as plt
+import virtualChannel
+from virtualChannel import DISTRIBUTIONS
 FRAME_ERROR = None
 
 
@@ -11,6 +13,9 @@ YELLOW = "\033[33m"
 BLUE = "\033[34m"
 WHITE = "\033[37m"
 RESET = "\033[0m"
+
+
+
 def plotFrameError(Test,snrRange, filePath, maxIterations, maxErrors, minSum=True, sumProd=False, bitFlip=False, readMatrixFile=False):
     print(f"{RED} Begin frame error plot {RESET}")
 
@@ -72,6 +77,48 @@ def plotFrameError(Test,snrRange, filePath, maxIterations, maxErrors, minSum=Tru
     plt.show() 
 
 
+
+def plotBurstError(Test, filePaths, maxIterations, maxErrors, plotTransmission):
+    print("Begin frame error plot")
+    
+    testBenches = []
+    for path in filePaths:
+        testBenches.append(LDPCEncoder(4,5,648, readDataMatrix=True, matrixPath=path))
+    totalFrameErrors = []
+    for Test in testBenches:
+        BERS = []
+        frameErrors = 0
+        iterations = 0
+        while frameErrors < maxErrors:
+            iterations += 1
+            os.system("cls")
+            print(f"Iteration No. {iterations}, Matrix: {path}, Frame Errors: {frameErrors}, FER {frameErrors/iterations}")
+            print(f"Matrices: {filePaths}")
+            message1 = np.random.randint(0, 2, size=Test.G.shape[1]).tolist()  
+            Test.encode(message1, 100)
+            encoded = Test.originalEncoded
+            transmission = virtualChannel.burstTransmission(encoded, DISTRIBUTIONS, 200)
+            hardDecisions = virtualChannel.mapConstellationsToBits(transmission)
+            if plotTransmission:
+                virtualChannel.compareOriginalToHardDecisions(encoded, hardDecisions,transmission)
+            BER = Test.virtualSumProduct(transmission, hardDecisions)
+            # BER = test1.minSumDecode(pyldpc.encode(test1.G, message1, snr))
+            if BER is  FRAME_ERROR:
+                BERS.append(1)
+                frameErrors += 1
+            if iterations > maxIterations:
+                # frameErrors = 0
+                break
+        totalFrameErrors.append(frameErrors/iterations)
+    plt.figure(figsize=(8, 5))
+    plt.semilogy(filePaths, totalFrameErrors, marker='o', linestyle='-')  
+    plt.xlabel("SNR (dB)")
+    
+    plt.ylabel("Frame Error Rate")
+    plt.title("Sum Product 5G LDPC Frame Error vs. SNR at 1/5 Data Rate, n= 2000, z = 80")
+    plt.grid(True, which="both", linestyle="--")
+    
+    plt.show() 
 def main():
     print(f"{GREEN} Enter simulation details...\n {RESET}")
 
@@ -87,29 +134,55 @@ def main():
                 path = input("\033[37m Enter filepath to matrix\n")
                 readFileBools[2] = str(path)
                 print(readFileBools)
-                Test = LDPCEncoder(4,5,648, readDataMatrix=readFileBools)
+                Test = LDPCEncoder(4,5,648, readDataMatrix=readFileBools, matrixPath=str(path))
                 selectDecoder = input(f"{WHITE}For min-sum decoding enter: A \n{WHITE}For sum-product enter: B\n{RESET}")
                 os.system("cls")
                 singleTest = input("Execute a single test? (Y/N)\n")
                 if singleTest == "Y":
+                    burst = input("Simulate Burst Transmission? (Y/N) \n")
+                    if burst=="Y":
+                        plot = input("Plot Simulated Transmission? (Y/N) \n")
+                        burstChannel = LDPCEncoder(4,5,2000, readDataMatrix=True, matrixPath=str(path))
+
+                        message = np.random.randint(0, 2, size=Test.G.shape[1]).tolist() 
+                        burstChannel.encode(message, 100)
+                        encoded = burstChannel.originalEncoded
+                        transmission = virtualChannel.burstTransmission(encoded, DISTRIBUTIONS, 200)
+                        hardDecisions = virtualChannel.mapConstellationsToBits(transmission)
+                        if plot:
+                            virtualChannel.compareOriginalToHardDecisions(encoded, hardDecisions,transmission)
+                        burstChannel.virtualSumProduct(transmission, hardDecisions)
                     snr = float(input("Select test SNR (DB)\n"))
                     os.system("cls")
                     message = np.random.randint(0, 2, size=Test.G.shape[1]).tolist() 
                     nonSpread = Test.encode(message, snr)
                     print(F"Sum Product Result {Test.sumProductDecodeTest(nonSpread)}")
                 elif singleTest == "N":
-                    SNRRange = []
-                    filePath = input("Enter file name to store results\n")
-                    maxIterations = int(input("Enter max iterations to run\n"))
-                    maxErrors = int(input("Enter maximum frame errors per SNR value\n"))
-                    inputSNR = input("Enter an SNR or exit\n")
-                    while  inputSNR != "exit":
-                        SNRRange.append(float(inputSNR))
-                        print(f"SNR RANGE {SNRRange}\n")
-                        inputSNR = input("Enter an SNR or exit\n")  
-                    os.system("cls")
-                    print(f"Testing range: {SNRRange}\n")
-                    plotFrameError(Test,SNRRange, filePath, maxIterations, maxErrors)
+                    burst = input("Simulate Burst Transmission? (Y/N) \n")
+                    if burst == "Y":
+                        filePaths = []
+                        newPath = input("Enter paths to rate-varying matrices or exit\n")
+                        while newPath != "exit":
+                            filePaths.append(newPath)
+                            newPath = input("Enter paths to rate-varying matrices or exit\n")
+                        maxIterations = int(input("Enter max iterations \n"))
+                        maxErrors = int(input("Enter Max errors \n"))
+                        plot = input("Plot Transmission? (Y/N)") == "Y"
+                        os.system("cls")
+                        plotBurstError(Test=Test, filePaths=filePaths, maxIterations=maxIterations, maxErrors=maxErrors, plotTransmission=plot)
+                    else:                
+                        SNRRange = []
+                        filePath = input("Enter file name to store results\n")
+                        maxIterations = int(input("Enter max iterations to run\n"))
+                        maxErrors = int(input("Enter maximum frame errors per SNR value\n"))
+                        inputSNR = input("Enter an SNR or exit\n")
+                        while  inputSNR != "exit":
+                            SNRRange.append(float(inputSNR))
+                            print(f"SNR RANGE {SNRRange}\n")
+                            inputSNR = input("Enter an SNR or exit\n")  
+                        os.system("cls")
+                        print(f"Testing range: {SNRRange}\n")
+                        plotFrameError(Test,SNRRange, filePath, maxIterations, maxErrors)
 
             if input("\033[31m Exit? (Y/N) \033[0m") == "Y":
                 break

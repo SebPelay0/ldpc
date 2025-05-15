@@ -10,7 +10,7 @@ baseDirPath = "conditionalData/conditional constellation points/single carrier_1
 def loadArray(filepath, plot=False):
     data = np.load(filepath)
     # print(data)
-    print(f"Length {len(data)}")
+    # print(f"Length {len(data)}")
     # sys.exit()
     if plot:
         ideal = np.array([1+1j, -1+1j, -1-1j, 1-1j])
@@ -67,7 +67,7 @@ def sortFiles(baseDir, files, interpolated):
                 symbols["10"][frameNum].append(loadArray(baseDir+ "/"+ file))
             elif "one_plus_jone" in file:
                 symbols["11"][frameNum].append(loadArray(baseDir+ "/"+ file))
-    total_00 = len(symbols["00"][4][0])
+    # total_00 = len(symbols["00"][4][0])
     # print(symbols["00"][0])
     # print(f"Count {total_00}")
     # sys.exit()
@@ -247,7 +247,7 @@ def plotFrameDistribution(symbols, baseDirPath, interpolated, save=False):
         plt.ylabel("Density")
         plt.grid(True, linestyle='--', linewidth=0.5)
         plt.text(0.05, 0.95,
-                f"$\mu$ = {realMean:.2f}\n$\sigma^2$ = {stdReal**2:.2f}",
+                f"$\mu$ = {realMean:.2f}\n$\ sigma^2$ = {stdReal**2:.2f}",
                 transform=plt.gca().transAxes,
                 fontsize=9, verticalalignment='top', bbox=dict(facecolor='white', alpha=0.7))
 
@@ -263,7 +263,7 @@ def plotFrameDistribution(symbols, baseDirPath, interpolated, save=False):
         plt.ylabel("Density")
         plt.grid(True, linestyle='--', linewidth=0.5)
         plt.text(0.05, 0.95,
-                f"$\mu$ = {imagMean:.2f}\n$\sigma^2$ = {stdImag**2:.2f}",
+                f"$\mu$ = {imagMean:.2f}\n$\ sigma^2$ = {stdImag**2:.2f}",
                 transform=plt.gca().transAxes,
                 fontsize=9, verticalalignment='top', bbox=dict(facecolor='white', alpha=0.7))
 
@@ -360,18 +360,19 @@ def printErrorsWithinFrame(frames, symbol):
 
 
 files = getFiles(baseDirPath)
-for file in files:
-    loadArray(baseDirPath+ "/"+ file)
+# print(files)
+# for file in files:
+#     loadArray(baseDirPath+ "/"+ file)
 
 # sys.exit()
 symbols = sortFiles(baseDirPath, files, interpolated=interpolate)
 print(symbols["00"][1])
-allFrames = []
-for i in range(0,5):
-    allFrames.append(symbols["01"][i][0])
-frameTest = symbols["00"][2][0]
+# allFrames = []
+# for i in range(0,5):
+#     allFrames.append(symbols["00"][i][0])
+# frameTest = symbols["00"][2][0]
 
-printErrorsWithinFrame(allFrames, "01")
+# printErrorsWithinFrame(allFrames, "00")
 
 # received = getDistribution(symbols["00"][0])
 

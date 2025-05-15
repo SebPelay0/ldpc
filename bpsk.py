@@ -56,7 +56,7 @@ RESET = "\033[0m"
 FRAME_ERROR = None
 
 class LDPCEncoder():
-    def __init__(self, d_v, d_c, n, seed = 20, readDataMatrix= False):
+    def __init__(self, d_v, d_c, n, seed = 20, readDataMatrix= False, matrixPath="Matrices/5GMatrix.mat"):
         self.d_v = d_v # number of times each message bit appears in a parity equation 
         self.d_c = d_c # num bits checked in a parity equation // code rate => 1 -(d_v/d_c)
         self.n = n
@@ -64,8 +64,13 @@ class LDPCEncoder():
         self.PN = None
         if readDataMatrix:
             # H,G = readMatrix("Matrices/parityMatrix.txt")
-            H = np.array(readMatrixFile("Matrices/5GMatrix.mat")["H"], dtype=int)
-            H = H[:1080,:] #HALF RATE  ROW REMOVAl
+            H = np.array(readMatrixFile(matrixPath)["H"], dtype=int)
+            # H = H[:1080,:] #HALF RATE  ROW REMOVAl
+            # H = H[:1400,:] #1/3 rate
+            # H = H[:1560,:] #1/4 rate
+            # scipy.io.savemat("Matrices/5GQuarterRate.mat", {"H":H})
+            # H = H[:1400,:] #1/3 rate
+            # H = H[:1560,:] #1/4 rate
             G = pyldpc.coding_matrix(H)
             self.H = H
             
@@ -424,7 +429,7 @@ class LDPCEncoder():
         i = 0
         for symbol in codeword:
             if i < 40:
-                 initialLLRs.extend([0.0, 0.0])
+                 initialLLRs.extend([1e-9,1e-9])
             else:
                 complex_y = complex(*symbol)  # convert (real, imag) tuple to complex number
                 llr_pair = computeLLRS(complex_y, dists)
@@ -483,7 +488,7 @@ class LDPCEncoder():
                     tanhValues = np.tanh(np.clip(np.array(incoming)/2, -20, 20))
 
                     tanhProd = np.prod(tanhValues)
-                    tanhProd = np.clip(tanhProd, -0.999999999, 0.999999999)
+                    tanhProd = np.clip(tanhProd, -0.999999999999, 0.999999999999)
 
                     E[j][target] =  2*np.arctanh(tanhProd)
                     # E[j][target] = np.clip(2*np.arctanh(tanhProd), -50, 50)
@@ -492,15 +497,15 @@ class LDPCEncoder():
                 # bitNodes[i] = numpy.clip(bitNodes[i], -100.0, 100.0)
             
             #Set new variable node messages, excluding each check node's own contribution
-            # if numIterations < 18:
-            #     damping = 0.0
-            # elif numIterations < 20:
-            #     damping = 0.2
-            # elif numIterations < 40:
-            #     damping = 0.3
-            # else:
-            #     damping = 0.6
-            damping = 0 
+            if numIterations < 18:
+                damping = 0.0
+            elif numIterations < 20:
+                damping = 0.2
+            elif numIterations < 40:
+                damping = 0.3
+            else:
+                damping = 0.6
+           
             # damping = 0.3
             for i in range(self.n):
                 for j in np.where(self.H[:, i] == 1)[0]:
