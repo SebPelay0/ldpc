@@ -1,0 +1,6 @@
+
+Built on desktop with pyldpc repo downloaded locally.
+
+pyinstaller -F --paths="C:\Users\Sebastian Pelayo\Desktop\testing\pyldpc"  main.py
+
+Move the matrix folder to be in the same directory as the built exe. 

@@ -9,12 +9,19 @@ import scipy.io
 import sys
 import numpy as np
 sys.path.append(os.path.abspath("../pyldpc"))
-import pyldpc
+# import pyldpc
 from collections import defaultdict
 import sdrNonBinary as nb
 from loadData import dists
+import encoder
 
-
+def deinterleave(interleaved_bits, depth=13):
+    interleaved_bits = np.asarray(interleaved_bits)
+    cols = int(np.ceil(len(interleaved_bits) / depth))
+    padded_len = cols * depth
+    padded_bits = np.pad(interleaved_bits, (0, padded_len - len(interleaved_bits)), constant_values=0)
+    matrix = padded_bits.reshape((depth, cols))
+    return matrix.T.flatten()[:len(interleaved_bits)]
 
 def computeLLRS(y_complex, distributions):
     re = y_complex.real
@@ -56,7 +63,7 @@ RESET = "\033[0m"
 FRAME_ERROR = None
 
 class LDPCEncoder():
-    def __init__(self, d_v, d_c, n, seed = 20, readDataMatrix= False, matrixPath="Matrices/5GMatrix.mat"):
+    def __init__(self, d_v, d_c, n, seed = 20, readDataMatrix= False, matrixPath="Matrices/BG2.mat"):
         self.d_v = d_v # number of times each message bit appears in a parity equation 
         self.d_c = d_c # num bits checked in a parity equation // code rate => 1 -(d_v/d_c)
         self.n = n
@@ -65,13 +72,21 @@ class LDPCEncoder():
         if readDataMatrix:
             # H,G = readMatrix("Matrices/parityMatrix.txt")
             H = np.array(readMatrixFile(matrixPath)["H"], dtype=int)
+            # H= H[:13440, :] # third rate BG2
+            # H = H[:10176, :] #Half Rate BG2
             # H = H[:1080,:] #HALF RATE  ROW REMOVAl
             # H = H[:1400,:] #1/3 rate
             # H = H[:1560,:] #1/4 rate
             # scipy.io.savemat("Matrices/5GQuarterRate.mat", {"H":H})
             # H = H[:1400,:] #1/3 rate
             # H = H[:1560,:] #1/4 rate
-            G = pyldpc.coding_matrix(H)
+            if matrixPath == "Matrices/BG2.mat":
+                # G = encoder.coding_matrix(H)
+                # scipy.io.savemat("Matrices/halfRateBG2.mat", {"G":G})
+                G = np.array(readMatrixFile("Matrices/thirdRateGeneratorBG2.mat")["G"], dtype=int)
+            else:
+                G = encoder.coding_matrix(H)
+            # scipy.io.savemat("Matrices/longGenerator.mat", {"G":G})
             self.H = H
             
             self.G = G
@@ -98,11 +113,11 @@ class LDPCEncoder():
             # plt.show()
             print(G.shape)
             
-        else:
-            H,G = pyldpc.make_ldpc(n,d_v, d_c,True,True)
-            self.H = H
-            self.G = G
-            self.m = n * (d_v/d_c) #num check nodesQQ
+        # else:
+        #     H,G = pyldpc.make_ldpc(n,d_v, d_c,True,True)
+        #     self.H = H
+        #     self.G = G
+        #     self.m = n * (d_v/d_c) #num check nodesQQ
         
         nonZero = np.count_nonzero(G)
         self.n = H.shape[1]
@@ -123,7 +138,8 @@ class LDPCEncoder():
         
         self.originalEncoded = np.dot(self.G, message) % 2
         self.SNR = snr
-        noisy = pyldpc.encode(self.G, message, snr)
+        noisy = self.originalEncoded
+        # noisy = pyldpc.encode(self.G, message, snr)
         # noisy = -1 * self.addNoiseBPSK(snr, self.originalEncoded)
         
         return noisy
@@ -419,23 +435,47 @@ class LDPCEncoder():
         self.BER = BER
     
         return FRAME_ERROR
+    
+    def virtualSumProduct(self, codeword, hardDecisionsIn, useInterleave):
+        # hardDecisions = deinterleave(hardDecisionsIn.copy())
+        numPuncturedBits = 384
+        if useInterleave: 
+            hardDecisions = hardDecisionsIn
+            print(f"Hard: {hardDecisions[90:100]}")
+            print(f"Origina: {self.originalEncoded[90:100]}")
+            bitNodes = np.array(codeword, dtype=float)  # Use soft channel valus instead of hard bits]
+            # print(codeword[:10])
+        
+            initialLLRs = []
+            i = 0
+            for symbol in codeword:
+                if i < -40:
+                    initialLLRs.extend([1e-9,1e-9])
+                else:
+                    complex_y = complex(*symbol)  # convert (real, imag) tuple to complex number
+                    llr_pair = computeLLRS(complex_y, dists)
+                    initialLLRs.extend(llr_pair) 
+                i+=1
+            initialLLRs = deinterleave(initialLLRs)
+            initialLLRs[:numPuncturedBits] = [1e-9]* numPuncturedBits #puncture  bits
+        else:
+            hardDecisions = hardDecisionsIn
+            print(f"Hard: {hardDecisions[90:100]}")
+            print(f"Origina: {self.originalEncoded[90:100]}")
+            bitNodes = np.array(codeword, dtype=float)  # Use soft channel valus instead of hard bits]
+            # print(codeword[:10])
+        
+            initialLLRs = []
+            i = 0
+            for symbol in codeword:
+                if i < numPuncturedBits:
+                    initialLLRs.extend([1e-9,1e-9])
+                else:
+                    complex_y = complex(*symbol)  # convert (real, imag) tuple to complex number
+                    llr_pair = computeLLRS(complex_y, dists)
+                    initialLLRs.extend(llr_pair)
+                i+=1
 
-    def virtualSumProduct(self, codeword, hardDecisionsIn):
-        hardDecisions = hardDecisionsIn.copy()
-        bitNodes = np.array(codeword, dtype=float)  # Use soft channel valus instead of hard bits]
-        print(codeword[:10])
-      
-        initialLLRs = []
-        i = 0
-        for symbol in codeword:
-            if i < 40:
-                 initialLLRs.extend([1e-9,1e-9])
-            else:
-                complex_y = complex(*symbol)  # convert (real, imag) tuple to complex number
-                llr_pair = computeLLRS(complex_y, dists)
-                initialLLRs.extend(llr_pair) 
-            i+=1
-        print(f"Initials: {len(initialLLRs)}")
         # M=> Bit-to-check messages
         M = {}  
         # Initialize bit nodes with the channel LLRs
@@ -505,7 +545,7 @@ class LDPCEncoder():
                 damping = 0.3
             else:
                 damping = 0.6
-           
+            damping = 0
             # damping = 0.3
             for i in range(self.n):
                 for j in np.where(self.H[:, i] == 1)[0]:
@@ -534,7 +574,7 @@ class LDPCEncoder():
         BER = errors/len(bitNodes) 
         print(f"Decoding Failed, Best Guess - BER: {BER}, SNR {self.SNR}, Eb/No {self.bitEnergyRatio}")
 
-        self.messageDecoded = bitNodes
+        self.messageDecoded = hardDecisions
         self.BER = BER
     
         return FRAME_ERROR
@@ -658,7 +698,7 @@ def readMatrixFile(filePath):
 
 #  Expected Noise Std: 0.7071067811865476, Measured Noise Std: 1.0
 
-Test = LDPCEncoder(4,5,648, readDataMatrix=True)
+# Test = LDPCEncoder(4,5,648, readDataMatrix=True)
 def test(snr):
     # DSSS Result
     np.random.seed(12)

@@ -5,16 +5,21 @@ import random
 import numpy as np
 import matplotlib.pyplot as plt
 import os
-# np.random.seed(3) #600 and 10
+import datetime
+import sys
+from matplotlib.collections import LineCollection
+np.random.seed(10) #600 and 10
 GOOD = 1
 BURST = -1
 DISTRIBUTIONS = dists
 
-# virtualChannel = bpsk.LDPCEncoder(4,5,2000, readDataMatrix=True)
+virtualChannel = bpsk.LDPCEncoder(4,5,2000, readDataMatrix=True, matrixPath="Matrices/5GHalfRate.mat")
 
-# message1 = np.random.randint(0, 2, size=400).tolist()  
-# virtualChannel.encode(message1, 100)
-# encoded = virtualChannel.originalEncoded
+message1 = np.random.randint(0, 2, size=400).tolist()  
+virtualChannel.encode(message1, 100)
+encoded = virtualChannel.originalEncoded
+
+
 
 def virtualTransmission(message, distributions, guardBits):
     transmittedValues = []
@@ -59,15 +64,19 @@ def virtualTransmission(message, distributions, guardBits):
     # print(f"Transmit: {transmittedValues[:10]}")
     # print(f"Message {message}")
     return transmittedValues
-
-def burstTransmission(message, distributions, guardBits):
+def burstTransmission(message, distributions, guardBits, harsh=False):
     transmittedValues = []
     i = 0
     scale = 0.925
     guardBits = int(0.20 * len(message))
-    AVERAGE_STATE_LENGTH = int(len(message)/16)
-    BURST_ERROR_PROB = 0.5
-    GOOD_ERROR_PROB = 0.2
+    if harsh:
+        AVERAGE_STATE_LENGTH = int(len(message)/16)
+        BURST_ERROR_PROB = 0.5
+        GOOD_ERROR_PROB = 0.2
+    else:
+        AVERAGE_STATE_LENGTH = int(len(message)/12)
+        BURST_ERROR_PROB = 0.25
+        GOOD_ERROR_PROB = 0.2
 
     state = GOOD
     stateLength = int(0.20 * len(message)) #initially assume first 1/5th of frame is free
@@ -110,7 +119,7 @@ def burstTransmission(message, distributions, guardBits):
                 imag = distributions[corrupted_symbol][1].rvs(1)[0]
             else:
                 if random.random() < 0.25:
-                    # Occasionally simulate an error even in the good state
+                    # Occasionally simulate an error even in the burst state
                     real = distributions[symbol][0].rvs(1)[0]
                     imag = distributions[symbol][1].rvs(1)[0]
                     complexSymbol = (real, imag)
@@ -141,6 +150,7 @@ def burstTransmission(message, distributions, guardBits):
 
     # print(f"Transmit (first 10): {transmittedValues[:10]}")
     return transmittedValues
+
 
 def mapConstellationsToBits(transmittedValues):
     # "00": []  -1 - 1j
@@ -208,7 +218,7 @@ def compareOriginalToHardDecisions(original, hardDecisions, received):
 
     if avg_error_magnitude is not None:
         info = [
-            f"BER: {100*BER:.2f}",
+            f"BER: {BER:.2f}",
             f"Total Errors: {numErrors}",
             f"Burst Errors: {burstCount}",
             f"Longest Burst: {max_burst_length}",
@@ -226,7 +236,22 @@ def compareOriginalToHardDecisions(original, hardDecisions, received):
 # compareOriginalToHardDecisions(encoded, hardDecisions,transmission)
 # virtualChannel.virtualSumProduct(transmission, hardDecisions)
 # print(f"Hard {len(hardDecisions)} Original: {len(message1)}")
+INTERLEAVE_DEPTH = 13
+def interleave(data_bits, depth=INTERLEAVE_DEPTH):
+    data_bits = np.asarray(data_bits)
+    rows = int(np.ceil(len(data_bits) / depth))
+    padded_len = rows * depth
+    padded_bits = np.pad(data_bits, (0, padded_len - len(data_bits)), constant_values=0)
+    matrix = padded_bits.reshape((rows, depth))
+    return matrix.T.flatten()[:len(data_bits)]
 
+def deinterleave(interleaved_bits, depth=INTERLEAVE_DEPTH):
+    interleaved_bits = np.asarray(interleaved_bits)
+    cols = int(np.ceil(len(interleaved_bits) / depth))
+    padded_len = cols * depth
+    padded_bits = np.pad(interleaved_bits, (0, padded_len - len(interleaved_bits)), constant_values=0)
+    matrix = padded_bits.reshape((depth, cols))
+    return matrix.T.flatten()[:len(interleaved_bits)]
 
 def plotBurstError(minSum=True, sumProd=False, bitFlip=False, readMatrixFile=False):
     print("Begin frame error plot")
@@ -238,27 +263,62 @@ def plotBurstError(minSum=True, sumProd=False, bitFlip=False, readMatrixFile=Fal
     totalFrameErrors = []
     sumProdBEROut = []
     bitFlipBEROut = []
-    maxErrors = 5000
-   
+    maxErrors = 500
     for snr in snrRange:
         avgBER = []
         avgSumProdBER = 0
         avgBitFlipBER = 0
         frameErrors = 0
         iterations = 0
+        codeLength = 19968
+        accumulateErrors = np.zeros(codeLength)
+        totalFrameBitErrors = 0
+        failedBitErrors = 0
         BERS = [0]
         while frameErrors < maxErrors:
             iterations += 1
-            os.system("cls")
-            print(f"Iteration No. {iterations}, SNR: {snr}, Frame Errors: {frameErrors}, FER {frameErrors/iterations}")
-            print(f"SNR RANGE: {snrRange}")
-            message1 = np.random.randint(0, 2, size=1000).tolist()  
-            virtualChannel.encode(message1, 100)
-            encoded = virtualChannel.originalEncoded
-            transmission = burstTransmission(encoded, DISTRIBUTIONS, 200)
-            hardDecisions = mapConstellationsToBits(transmission)
-            compareOriginalToHardDecisions(encoded, hardDecisions,transmission)
-            BER = virtualChannel.virtualSumProduct(transmission, hardDecisions)
+            useInterleave = True
+            # input("stop")
+            if useInterleave:
+                os.system("cls")
+                print(f"Iteration No. {iterations}, SNR: {snr}, Frame Errors: {frameErrors}, FER {frameErrors/iterations}")
+                print(f"SNR RANGE: {snrRange}")
+                message1 = np.random.randint(0, 2, size=virtualChannel.G.shape[1]).tolist()  
+                
+                virtualChannel.encode(message1, 100)
+                encoded = virtualChannel.originalEncoded
+                print(f"\033[32m Information Length: {virtualChannel.G.shape[1]}, Total Encoded length: {len(encoded)}, Rate: {virtualChannel.G.shape[1]/len(encoded)}\033[0m")
+                interleavedEncoded = interleave(encoded)
+                transmission = burstTransmission(interleavedEncoded, DISTRIBUTIONS, 200, harsh=True)
+                assert (np.array_equal(virtualChannel.originalEncoded, deinterleave(interleavedEncoded))), "INTERLEAVE FAILED"
+
+                print(f"Begin Decoding...")
+                hardDecisions = mapConstellationsToBits(transmission)
+                # compareOriginalToHardDecisions(virtualChannel.originalEncoded, deinterleave(hardDecisions.copy()),transmission)
+                BER = virtualChannel.virtualSumProduct(transmission, deinterleave(hardDecisions), useInterleave)
+            else:
+                os.system("cls")
+                message1 = np.random.randint(0, 2, size=virtualChannel.G.shape[1]).tolist()  
+                print(f"Message Length: {virtualChannel.G.shape[1]}")
+                virtualChannel.encode(message1, 100)
+                encoded = virtualChannel.originalEncoded
+                print(f"Iteration No. {iterations}, SNR: {snr}, Frame Errors: {frameErrors}, FER {frameErrors/iterations}, RATE: {virtualChannel.G.shape[1]/len(encoded)}")
+                print(f"SNR RANGE: {snrRange}")
+               
+                transmission = burstTransmission(encoded, DISTRIBUTIONS, 200, harsh=True)
+                hardDecisions = mapConstellationsToBits(transmission)
+                # compareOriginalToHardDecisions(encoded, hardDecisions,transmission)
+                BER = virtualChannel.virtualSumProduct(transmission, hardDecisions, useInterleave)
+
+            #Error locations: 
+            decoderOutput = virtualChannel.messageDecoded
+            assert(len(decoderOutput) == len(encoded), "Decoding length mismatch")
+            frameBitErrors =  np.sum(np.array(decoderOutput) != np.array(encoded))
+            totalFrameBitErrors += frameBitErrors
+            for i, bit in enumerate(decoderOutput):
+                if bit != encoded[i]:
+                    accumulateErrors[i] +=1
+                        
             # noisy = test1.spreadDSS(4, snr)
             # codeword = test1.deSpreadDSS(noisy)
             # BER =  virtualChannel.sumProductDecodeTest(noist)
@@ -269,21 +329,25 @@ def plotBurstError(minSum=True, sumProd=False, bitFlip=False, readMatrixFile=Fal
             if BER is  FRAME_ERROR:
                 BERS.append(1)
                 frameErrors += 1
-            if iterations > 100000:
-                # frameErrors = 0
+                failedBitErrors += frameBitErrors
+            if iterations > 50000:
                 break
             # if iterations == 200 and frameErrors == 0:
             #     break
+            
        
         totalFrameErrors.append(frameErrors/iterations)
-
+        averageErrorsInFailedFrame = failedBitErrors/frameErrors
+        averageErrorsInFrame = totalFrameBitErrors/iterations
 
         # test1.write("results2.txt", snr, avgBER/n, avgSumProdBER/5.5,avgBitFlipBER/n )
     print(f"SNRS: {snrRange}")
-    print(f"Total frame errors: {totalFrameErrors}")
-    filePath = "HalfRate.txt"
+    print(f"Total frame errors: {totalFrameErrors}, Num Iterations: {iterations}")
+    filePath = "newErrors.txt"
+    with open("C:/Users/lab-user/OneDrive - UNSW/testing/ldpc/Matrices/FER_RESULTS.txt", "a") as f:
+        f.write(f"FER: {totalFrameErrors}, Date: {datetime.datetime.now()}, Rate: {virtualChannel.G.shape[1]/len(encoded)}, Encoded Length: {len(encoded)}\n")
     with open(filePath, "a") as file:
-            file.write(f"Half Rate FER: {totalFrameErrors}\n")
+            file.write(f"FER: {totalFrameErrors}, Date: {datetime.datetime.now()}\n")
     plt.figure(figsize=(8, 5))
     plt.semilogy(snrRange, totalFrameErrors, marker='o', linestyle='-')  
     plt.xlabel("SNR (dB)")
@@ -294,7 +358,28 @@ def plotBurstError(minSum=True, sumProd=False, bitFlip=False, readMatrixFile=Fal
    
     plt.show()
 
-# plotBurstError()
+    nz = np.flatnonzero(accumulateErrors)
+    if nz.size == 0:
+        print("No errors recorded.")
+    else:
+        counts = accumulateErrors[nz]
+        segs = [((i, 0), (i, c)) for i, c in zip(nz, counts)]
+
+        fig, ax = plt.subplots(figsize=(18, 3))
+        lc = LineCollection(segs, linewidths=0.8)
+        ax.add_collection(lc)
+        ax.scatter(nz, counts, s=6)  # optional dots at the tips
+        ax.set_xlim(0, accumulateErrors.size)
+        ax.set_ylim(0, counts.max() * 1.05)
+        ax.set_xlabel("Bit index")
+        ax.set_ylabel("Error count")
+        ax.set_title(f"Decoding Error Distribution")
+        ax.text(0.99,0.98, f"Average Num Errors: {averageErrorsInFrame}", transform=ax.transAxes, ha="right", va="top", bbox=dict(boxstyle="round", facecolor="white"), zorder=10)
+        fig.tight_layout()
+        plt.savefig("C:/Users/lab-user/OneDrive - UNSW/testing/ldpc/Matrices/titlePlot.png")
+        plt.show() 
+
+plotBurstError()
 
 # plotFrameError()
 

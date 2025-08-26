@@ -6,7 +6,8 @@ import scipy.stats
 
 interpolate = False
 baseDirPath = "conditionalData/conditional constellation points/single carrier_1744853780"
-
+baseDirPath2 = "conditionalData/conditional constellation points/single carrier_1744853909"
+baseDirPath3 = "conditionalData/conditional constellation points/single carrier_1744853180"
 def loadArray(filepath, plot=False):
     data = np.load(filepath)
     # print(data)
@@ -53,7 +54,7 @@ def sortFiles(baseDir, files, interpolated):
     }
 
     for file in files:
-        if (interpolated and file.find("interp")) or ((not interpolated) and file.find("scfde")):
+        if (interpolated and "interp" in file) or (not interpolated and "scfde" in file):
 
             frameSplit = file.split("frame")[-1]
             frameNum = int(frameSplit.split(".npy")[0])
@@ -311,6 +312,7 @@ def printErrorsWithinFrame(frames, symbol):
 
     # === Error stats ===
     numErrors = sum(errors)
+    BER = numErrors/len(combinedFrame)
     avg_error_magnitude = np.mean(error_magnitudes) if error_magnitudes else 0
     max_burst_length = 0
     current_burst = 0
@@ -330,7 +332,11 @@ def printErrorsWithinFrame(frames, symbol):
     plt.figure(figsize=(12, 3))
     plt.bar(range(len(errors)), errors, color='red', edgecolor='black')
     plt.xlabel("Symbol Index")
-    plt.title(f"Error Map for Transmitted Symbol '{symbol}' (Across Frames)")
+    if interpolate:
+        title = "Interpolated"
+    else: title = "sc-fde"
+
+    plt.title(f"Error Map for Transmitted Symbol '{symbol}' ({title})")
     plt.ylim(-0.1, 1.1)
     plt.grid(axis='y', linestyle='--', linewidth=0.5)
 
@@ -353,32 +359,40 @@ def printErrorsWithinFrame(frames, symbol):
     plt.text(0.99, 0.85, f"Avg Error Magnitude: {avg_error_magnitude:.2f}",
              transform=plt.gca().transAxes, fontsize=9, ha='right', va='bottom',
              bbox=dict(facecolor='white', edgecolor='black', boxstyle='round,pad=0.3'))
-
+    plt.text(0.99, 0.75, f"BER: {BER:.2f}",
+             transform=plt.gca().transAxes, fontsize=9, ha='right', va='bottom',
+             bbox=dict(facecolor='white', edgecolor='black', boxstyle='round,pad=0.3'))
+    
     plt.tight_layout()
     plt.legend(loc='lower left')
     plt.show()
 
 
 files = getFiles(baseDirPath)
+files2 = getFiles(baseDirPath2)
+files3 = getFiles(baseDirPath3)
+
+for file in files2:
+    files.append(file)
+for file in files3:
+    files.append(file)
 # print(files)
 # for file in files:
 #     loadArray(baseDirPath+ "/"+ file)
 
 # sys.exit()
 symbols = sortFiles(baseDirPath, files, interpolated=interpolate)
-print(symbols["00"][1])
-# allFrames = []
-# for i in range(0,5):
-#     allFrames.append(symbols["00"][i][0])
-# frameTest = symbols["00"][2][0]
-
-# printErrorsWithinFrame(allFrames, "00")
+print(symbols["10"][1])
+allFrames = []
+for i in range(0,5):
+    allFrames.append(symbols["10"][i][0])
+printErrorsWithinFrame(allFrames, "10")
 
 # received = getDistribution(symbols["00"][0])
 
 dists = plotFrameDistribution(symbols, baseDirPath, interpolated=interpolate)
 # print(dists["00"][0].mean())
-path = "conditional constellation points/single carrier_1744853468/minus_one_minus_jone_rx_scfde_frame0.npy"
+path = "conditional constellation points/single carrier_1744853468"
 # data = loadArray(path)
 
 # data = loadArray("/home/sebastian/LDPC/ldpc/conditionalData/conditional constellation points/single carrier_1744853780/one_minus_jone_rx_scfde_frame1.npy", plot=True)
