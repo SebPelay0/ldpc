@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 import math
 import time
 import os
+os.add_dll_directory("C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v12.0\\bin")
 import scipy
 import scipy.io
 import sys
@@ -14,6 +15,7 @@ from collections import defaultdict
 import sdrNonBinary as nb
 from loadData import dists
 import encoder
+import cupy as cp
 
 def deinterleave(interleaved_bits, depth=13):
     interleaved_bits = np.asarray(interleaved_bits)
@@ -63,7 +65,7 @@ RESET = "\033[0m"
 FRAME_ERROR = None
 
 class LDPCEncoder():
-    def __init__(self, d_v, d_c, n, seed = 20, readDataMatrix= False, matrixPath="Matrices/BG2.mat"):
+    def __init__(self, d_v, d_c, n, seed = 20, readDataMatrix= False, matrixPath="Matrices/5GThirdRate.mat"):
         self.d_v = d_v # number of times each message bit appears in a parity equation 
         self.d_c = d_c # num bits checked in a parity equation // code rate => 1 -(d_v/d_c)
         self.n = n
@@ -72,6 +74,9 @@ class LDPCEncoder():
         if readDataMatrix:
             # H,G = readMatrix("Matrices/parityMatrix.txt")
             H = np.array(readMatrixFile(matrixPath)["H"], dtype=int)
+            print(f"H: {H}")
+            
+            # G = encoder.coding_matrix(H)
             # H= H[:13440, :] # third rate BG2
             # H = H[:10176, :] #Half Rate BG2
             # H = H[:1080,:] #HALF RATE  ROW REMOVAl
@@ -83,8 +88,10 @@ class LDPCEncoder():
             if matrixPath == "Matrices/BG2.mat":
                 # G = encoder.coding_matrix(H)
                 # scipy.io.savemat("Matrices/halfRateBG2.mat", {"G":G})
+                print(f"Worker {os.getpid()} is loading G")
                 G = np.array(readMatrixFile("Matrices/thirdRateGeneratorBG2.mat")["G"], dtype=int)
             else:
+                # input("DOING THIS")
                 G = encoder.coding_matrix(H)
             # scipy.io.savemat("Matrices/longGenerator.mat", {"G":G})
             self.H = H
@@ -111,7 +118,7 @@ class LDPCEncoder():
             # plt.ylabel("Number of 1s")
             # plt.title("Distribution of 1s in Each Column")
             # plt.show()
-            print(G.shape)
+            # print(G.shape)
             
         # else:
         #     H,G = pyldpc.make_ldpc(n,d_v, d_c,True,True)
@@ -119,7 +126,7 @@ class LDPCEncoder():
         #     self.G = G
         #     self.m = n * (d_v/d_c) #num check nodesQQ
         
-        nonZero = np.count_nonzero(G)
+
         self.n = H.shape[1]
         self.y = None
         self.originalEncoded = None
@@ -145,8 +152,8 @@ class LDPCEncoder():
         return noisy
     
     def isValidCodeword(self, decoded_codeword):
-        syndrome = np.dot(self.H, decoded_codeword.T) % 2
-        is_valid = np.all(syndrome == 0)
+        syndrome = cp.dot(self.H, decoded_codeword.T) % 2
+        is_valid = cp.all(syndrome == 0)
         # print(f"syndome {syndrome}")
         return is_valid
 
@@ -435,108 +442,86 @@ class LDPCEncoder():
         self.BER = BER
     
         return FRAME_ERROR
-    
     def virtualSumProduct(self, codeword, hardDecisionsIn, useInterleave):
-        # hardDecisions = deinterleave(hardDecisionsIn.copy())
         numPuncturedBits = 384
-        if useInterleave: 
-            hardDecisions = hardDecisionsIn
-            print(f"Hard: {hardDecisions[90:100]}")
-            print(f"Origina: {self.originalEncoded[90:100]}")
-            bitNodes = np.array(codeword, dtype=float)  # Use soft channel valus instead of hard bits]
-            # print(codeword[:10])
-        
-            initialLLRs = []
-            i = 0
-            for symbol in codeword:
+
+        # ---- Normalize inputs to GPU
+        codeword      = cp.asarray(codeword)
+        hardDecisions = cp.asarray(hardDecisionsIn)
+
+        # ---- Ensure H on GPU once; build CPU neighbor lists ONCE (no .get() in loop)
+        self.H = cp.asarray(self.H, dtype=cp.int8)
+        if not hasattr(self, "_nbrs_ready") or not self._nbrs_ready:
+            H_cpu = np.asarray(cp.asnumpy(self.H))
+            self._row_nbrs = [np.where(H_cpu[j] == 1)[0].astype(np.int32) for j in range(int(self.m))]
+            self._col_nbrs = [np.where(H_cpu[:, i] == 1)[0].astype(np.int32) for i in range(self.n)]
+            self._nbrs_ready = True
+
+        # ---- Build initial LLRs (keep your existing helpers; move once to GPU, use float32)
+        # NOTE: iterating a CuPy array is slow, so pull to CPU for the LLR loop
+        cw_cpu = np.asarray(cp.asnumpy(codeword))
+        initialLLRs_host = []
+        if useInterleave:
+            for i, symbol in enumerate(cw_cpu):
                 if i < -40:
-                    initialLLRs.extend([1e-9,1e-9])
+                    initialLLRs_host.extend([1e-9, 1e-9])
                 else:
-                    complex_y = complex(*symbol)  # convert (real, imag) tuple to complex number
-                    llr_pair = computeLLRS(complex_y, dists)
-                    initialLLRs.extend(llr_pair) 
-                i+=1
-            initialLLRs = deinterleave(initialLLRs)
-            initialLLRs[:numPuncturedBits] = [1e-9]* numPuncturedBits #puncture  bits
+                    llr_pair = computeLLRS(complex(*symbol), dists)
+                    initialLLRs_host.extend(llr_pair)
+            initialLLRs_host = deinterleave(initialLLRs_host)
+            initialLLRs_host[:numPuncturedBits] = [1e-9] * numPuncturedBits
         else:
-            hardDecisions = hardDecisionsIn
-            print(f"Hard: {hardDecisions[90:100]}")
-            print(f"Origina: {self.originalEncoded[90:100]}")
-            bitNodes = np.array(codeword, dtype=float)  # Use soft channel valus instead of hard bits]
-            # print(codeword[:10])
-        
-            initialLLRs = []
-            i = 0
-            for symbol in codeword:
+            for i, symbol in enumerate(cw_cpu):
                 if i < numPuncturedBits:
-                    initialLLRs.extend([1e-9,1e-9])
+                    initialLLRs_host.extend([1e-9, 1e-9])
                 else:
-                    complex_y = complex(*symbol)  # convert (real, imag) tuple to complex number
-                    llr_pair = computeLLRS(complex_y, dists)
-                    initialLLRs.extend(llr_pair)
-                i+=1
+                    llr_pair = computeLLRS(complex(*symbol), dists)
+                    initialLLRs_host.extend(llr_pair)
 
-        # M=> Bit-to-check messages
-        M = {}  
-        # Initialize bit nodes with the channel LLRs
+        initialLLRs = cp.asarray(initialLLRs_host, dtype=cp.float32)
+        bitNodes    = initialLLRs.copy()
+
+        # ---- Messages (dicts kept; keys are Python ints from precomputed neighbors)
+        M = {}
         for j in range(int(self.m)):
-            for i in np.where(self.H[j] == 1)[0]:
-                if i not in M:
-                    M[i] = {}
-                M[i][j] = initialLLRs[i]
-        
-        #E => Check to bit messages
-        E = {j: {} for j in range(int(self.m))}
+            for i in self._row_nbrs[j]:
+                ii = int(i)
+                if ii not in M:
+                    M[ii] = {}
+                M[ii][j] = initialLLRs[ii]
 
-        # # Initialize check-to-bit messages
-        
-        initialLLRs = np.array(initialLLRs, dtype=float)
-        bitNodes = initialLLRs.copy()
-        # hardDecisions = [0]*len(bitNodes)
-        # for i in range(len(bitNodes)):
-        #         if bitNodes[i] > 0:
-        #             hardDecisions[i] = 0
-        #         else: hardDecisions[i] = 1
-    
-        BER = 0
-        errors = 0
+        E = {j: {} for j in range(int(self.m))}
+        orig_gpu = cp.asarray(self.originalEncoded, dtype=cp.int8)
+
         numIterations = 0
         while numIterations < 50:
             self.numIterations = numIterations
-            errors = np.sum(np.array(self.originalEncoded) != np.array(hardDecisions))
-            print(f"Decoding Iteration {numIterations}: BER {errors/len(bitNodes)}")
-            #Test the hard decision on current soft values
-            if self.isValidCodeword(np.array(hardDecisions)):
-                errors = np.sum(np.array(self.originalEncoded) != np.array(hardDecisions))
-                print(f"Sum Product Decoding done after {numIterations} Iterations")
+
+            errors = cp.sum(orig_gpu != hardDecisions)
+            # (Printing every iter costs time; comment out for speed)
+            print(f"Worker: {os.getpid()}, Iter {numIterations}: BER {errors/len(bitNodes)}")
+
+            # Keep isValidCodeword on GPU (pass CuPy)
+            if self.isValidCodeword(hardDecisions):
+                errors = cp.sum(orig_gpu != hardDecisions)
+                # print(f"Sum Product Decoding done after {numIterations} Iterations")
                 self.messageDecoded = hardDecisions
-                return errors/len(bitNodes)
+                return errors / len(bitNodes)
 
-            messagesReceivedByBits = np.zeros(len(bitNodes)) 
-
-            for j in range(int(self.m)):  
-                Ej = np.where(self.H[j] == 1)[0]  # All bits connected to check j
-
+            # ---- CHECK NODE UPDATE (E) ----
+            for j in range(int(self.m)):
+                Ej = self._row_nbrs[j]  # Python-int array; no GPU sync inside loop
                 for target in Ej:
-                    # Use all other bits except the target
                     others = [k for k in Ej if k != target]
+                    if others:
+                        incoming_vec = cp.asarray([M[int(k)][j] for k in others], dtype=cp.float32)
+                        tanhValues   = cp.tanh(cp.clip(incoming_vec / 2, -20, 20))
+                        tanhProd     = cp.clip(cp.prod(tanhValues), -0.999999999999, 0.999999999999)
+                        E[j][int(target)] = 2 * cp.arctanh(tanhProd)
+                    else:
+                        E[j][int(target)] = cp.float32(0.0)
 
-                    # Get valid messages bits to this check
-                    incoming = [M[k][j] for k in others]
-
-                    # tanhValues = np.array([np.tanh(M/2) for M in incoming])
-                    tanhValues = np.tanh(np.clip(np.array(incoming)/2, -20, 20))
-
-                    tanhProd = np.prod(tanhValues)
-                    tanhProd = np.clip(tanhProd, -0.999999999999, 0.999999999999)
-
-                    E[j][target] =  2*np.arctanh(tanhProd)
-                    # E[j][target] = np.clip(2*np.arctanh(tanhProd), -50, 50)
-
-        
-                # bitNodes[i] = numpy.clip(bitNodes[i], -100.0, 100.0)
-            
-            #Set new variable node messages, excluding each check node's own contribution
+            # ---- Damping (unchanged; you set it to 0)
             if numIterations < 18:
                 damping = 0.0
             elif numIterations < 20:
@@ -545,39 +530,451 @@ class LDPCEncoder():
                 damping = 0.3
             else:
                 damping = 0.6
-            damping = 0
-            # damping = 0.3
+            damping = 0.0
+
+            # ---- VARIABLE NODE UPDATE (M) ----
             for i in range(self.n):
-                for j in np.where(self.H[:, i] == 1)[0]:
-                    otherChecks = [k for k in np.where(self.H[:, i] == 1)[0] if k != j]
-                    newMsg = initialLLRs[i] + sum(E[k][i] for k in otherChecks)
-                    M[i][j] = damping * M[i][j] + (1 - damping) * newMsg
-                    # M[i][j] =  (initialLLRs[i] + sum(E[k][i] for k in otherChecks))
-            
-            #Calculate LLR total for the variable node
+                cols = self._col_nbrs[i]
+                for j in cols:
+                    otherChecks = [k for k in cols if k != j]
+                    if otherChecks:
+                        e_vals = cp.asarray([E[int(k)][i] for k in otherChecks], dtype=cp.float32)
+                        e_sum  = cp.sum(e_vals)       # CuPy reduction (not Python sum)
+                    else:
+                        e_sum  = cp.float32(0.0)
+                    newMsg = initialLLRs[i] + e_sum
+                    M[i][int(j)] = damping * M[i][int(j)] + (1 - damping) * newMsg
+
+            # ---- AGGREGATE variable LLRs ----
             for i in range(len(bitNodes)):
-                incoming_checks = np.where(self.H[:, i] == 1)[0]
-                bitNodes[i] = initialLLRs[i] + sum(E[j][i] for j in incoming_checks)
-                
-    
-            bitNodes = np.clip(bitNodes, -30, 30)
-         
-            for i in range(len(bitNodes)):
-                if bitNodes[i] > 0:
-                    hardDecisions[i] = 0
-                else: hardDecisions[i] = 1
-     
+                inc = self._col_nbrs[i]
+                if len(inc) > 0:
+                    e_vals = cp.asarray([E[int(j)][i] for j in inc], dtype=cp.float32)
+                    bitNodes[i] = initialLLRs[i] + cp.sum(e_vals)
+                else:
+                    bitNodes[i] = initialLLRs[i]
+
+            bitNodes = cp.clip(bitNodes, -30, 30)
+
+            # ---- Vectorized hard decisions (same logic)
+            hardDecisions[...] = (bitNodes <= 0).astype(cp.int8)
+
             numIterations += 1
-        
-        
-        errors = np.sum(np.array(self.originalEncoded) != np.array(hardDecisions))
-        BER = errors/len(bitNodes) 
-        print(f"Decoding Failed, Best Guess - BER: {BER}, SNR {self.SNR}, Eb/No {self.bitEnergyRatio}")
+
+        errors = cp.sum(orig_gpu != hardDecisions)
+        BER = errors / len(bitNodes)
+        # print(f"Decoding Failed, Best Guess - BER: {BER}, SNR {self.SNR}, Eb/No {self.bitEnergyRatio}")
 
         self.messageDecoded = hardDecisions
         self.BER = BER
-    
         return FRAME_ERROR
+
+    # def virtualSumProduct(self, codeword, hardDecisionsIn, useInterleave):
+    #     numPuncturedBits = 384
+
+    #     # Normalize inputs to CuPy
+    #     codeword      = cp.asarray(codeword)
+    #     hardDecisions = cp.asarray(hardDecisionsIn)
+
+    #     # (Optional) ensure H is on GPU
+    #     self.H = cp.asarray(self.H)
+
+    #     # Build initial LLRs using your existing helpers; then move to GPU once
+    #     if useInterleave:
+    #         initialLLRs_host = []
+    #         i = 0
+    #         for symbol in codeword:
+    #             if i < -40:
+    #                 initialLLRs_host.extend([1e-9, 1e-9])
+    #             else:
+    #                 complex_y = complex(*symbol)
+    #                 llr_pair = computeLLRS(complex_y, dists)
+    #                 initialLLRs_host.extend(llr_pair)
+    #             i += 1
+    #         initialLLRs_host = deinterleave(initialLLRs_host)
+    #         initialLLRs_host[:numPuncturedBits] = [1e-9] * numPuncturedBits
+    #     else:
+    #         initialLLRs_host = []
+    #         i = 0
+    #         for symbol in codeword:
+    #             if i < numPuncturedBits:
+    #                 initialLLRs_host.extend([1e-9, 1e-9])
+    #             else:
+    #                 complex_y = complex(*symbol)
+    #                 llr_pair = computeLLRS(complex_y, dists)
+    #                 initialLLRs_host.extend(llr_pair)
+    #             i += 1
+
+    #     # Move LLRs to GPU (float32 is faster)
+    #     initialLLRs = cp.asarray(initialLLRs_host, dtype=cp.float32)
+    #     bitNodes    = initialLLRs.copy()
+
+    #     # M: bit->check messages (dicts; keys must be Python ints)
+    #     M = {}
+    #     for j in range(int(self.m)):
+    #         nzCols = cp.where(self.H[j] == 1)[0].get().tolist()  # Python ints
+    #         for i in nzCols:
+    #             if i not in M:
+    #                 M[i] = {}
+    #             M[i][j] = initialLLRs[i]
+
+    #     # E: check->bit messages
+    #     E = {j: {} for j in range(int(self.m))}
+
+    #     # Cache original encoded as CuPy once
+    #     orig_gpu = cp.asarray(self.originalEncoded)
+
+    #     numIterations = 0
+    #     while numIterations < 50:
+    #         self.numIterations = numIterations
+
+    #         errors = cp.sum(orig_gpu != hardDecisions)
+    #         print(f"Worker: {os.getpid()}, Decoding Iteration {numIterations}: BER {errors/len(bitNodes)}")
+
+    #         # Keep isValidCodeword GPU-based (since hardDecisions is CuPy)
+    #         if self.isValidCodeword(hardDecisions):
+    #             errors = cp.sum(orig_gpu != hardDecisions)
+    #             print(f"Sum Product Decoding done after {numIterations} Iterations")
+    #             self.messageDecoded = hardDecisions
+    #             return errors / len(bitNodes)
+
+    #         # ---- CHECK NODE UPDATE (E) ----
+    #         for j in range(int(self.m)):
+    #             Ej = cp.where(self.H[j] == 1)[0].get().tolist()  # Python ints
+    #             for target in Ej:
+    #                 # all neighbors except target
+    #                 others = [k for k in Ej if k != target]
+
+    #                 # Gather incoming as a CuPy vector, then do tanh/prod on GPU
+    #                 if others:
+    #                     incoming_vec = cp.asarray([M[k][j] for k in others], dtype=cp.float32)
+    #                     tanhValues   = cp.tanh(cp.clip(incoming_vec / 2, -20, 20))
+    #                     tanhProd     = cp.clip(cp.prod(tanhValues), -0.999999999999, 0.999999999999)
+    #                     E[j][target] = 2 * cp.arctanh(tanhProd)
+    #                 else:
+    #                     E[j][target] = cp.float32(0.0)
+
+    #         # Damping (your schedule; you zero it anyway)
+    #         if numIterations < 18:
+    #             damping = 0.0
+    #         elif numIterations < 20:
+    #             damping = 0.2
+    #         elif numIterations < 40:
+    #             damping = 0.3
+    #         else:
+    #             damping = 0.6
+    #         damping = 0.0
+
+    #         # ---- VARIABLE NODE UPDATE (M) ----
+    #         for i in range(self.n):
+    #             cols = cp.where(self.H[:, i] == 1)[0].get().tolist()  # Python ints
+    #             for j in cols:
+    #                 otherChecks = [k for k in cols if k != j]
+    #                 if otherChecks:
+    #                     e_vals = cp.asarray([E[k][i] for k in otherChecks], dtype=cp.float32)
+    #                     e_sum  = cp.sum(e_vals)     # CuPy sum (avoid Python sum)
+    #                 else:
+    #                     e_sum  = cp.float32(0.0)
+    #                 newMsg = initialLLRs[i] + e_sum
+    #                 M[i][j] = damping * M[i][j] + (1.0 - damping) * newMsg
+
+    #         # ---- AGGREGATE variable LLRs ----
+    #         for i in range(len(bitNodes)):
+    #             incoming_checks = cp.where(self.H[:, i] == 1)[0].get().tolist()
+    #             if incoming_checks:
+    #                 e_vals = cp.asarray([E[j][i] for j in incoming_checks], dtype=cp.float32)
+    #                 bitNodes[i] = initialLLRs[i] + cp.sum(e_vals)  # CuPy sum
+    #             else:
+    #                 bitNodes[i] = initialLLRs[i]
+
+    #         bitNodes = cp.clip(bitNodes, -30, 30)
+
+    #         # Vectorized hard decisions (same logic as your loop)
+    #         hardDecisions[...] = (bitNodes <= 0).astype(cp.int8)
+
+    #         numIterations += 1
+
+    #     errors = cp.sum(orig_gpu != hardDecisions)
+    #     BER = errors / len(bitNodes)
+    #     print(f"Decoding Failed, Best Guess - BER: {BER}, SNR {self.SNR}, Eb/No {self.bitEnergyRatio}")
+
+    #     self.messageDecoded = hardDecisions
+    #     self.BER = BER
+    #     return FRAME_ERROR
+    # def virtualSumProduct(self, codeword, hardDecisionsIn, useInterleave):
+    #     # hardDecisions = deinterleave(hardDecisionsIn.copy())
+    #     numPuncturedBits = 384 #or 384 for long
+    #     codeword = cp.asarray(codeword)
+    #     hardDecisions = cp.asarray(hardDecisionsIn)
+    #     if useInterleave: 
+    #         # hardDecisions = hardDecisionsIn
+    #         # print(f"Hard: {hardDecisions[90:100]}")
+    #         # print(f"Origina: {self.originalEncoded[90:100]}")
+    #         bitNodes = cp.array(codeword, dtype=cp.float32)  # Use soft channel valus instead of hard bits]
+    #         # print(codeword[:10])
+        
+    #         initialLLRs = []
+    #         i = 0
+    #         for symbol in codeword:
+    #             if i < -40:
+    #                 initialLLRs.extend([1e-9,1e-9])
+    #             else:
+    #                 complex_y = complex(*symbol)  # convert (real, imag) tuple to complex number
+    #                 llr_pair = computeLLRS(complex_y, dists)
+    #                 initialLLRs.extend(llr_pair) 
+    #             i+=1
+    #         initialLLRs = deinterleave(initialLLRs)
+    #         initialLLRs[:numPuncturedBits] = [1e-9]* numPuncturedBits #puncture  bits
+    #     else:
+    #         hardDecisions = hardDecisionsIn
+    #         # print(f"Hard: {hardDecisions[90:100]}")
+    #         # print(f"Origina: {self.originalEncoded[90:100]}")
+    #         bitNodes = cp.array(codeword, dtype=cp.float32)  # Use soft channel valus instead of hard bits]
+    #         # print(codeword[:10])
+        
+    #         initialLLRs = []
+    #         i = 0
+    #         for symbol in codeword:
+    #             if i < numPuncturedBits:
+    #                 initialLLRs.extend([1e-9,1e-9])
+    #             else:
+    #                 complex_y = complex(*symbol)  # convert (real, imag) tuple to complex number
+    #                 llr_pair = computeLLRS(complex_y, dists)
+    #                 initialLLRs.extend(llr_pair)
+    #             i+=1
+
+    #     # M=> Bit-to-check messages
+    #     initialLLRs = cp.array(initialLLRs, dtype=cp.float32)
+    #     M = {}  
+    #     self.H = cp.asarray(self.H)
+    #     # Initialize bit nodes with the channel LLRs
+    #     for j in range(int(self.m)):
+    #         nzCols = cp.where(self.H[j]==1)[0].get().tolist()
+    #         for i in nzCols:
+    #             if i not in M:
+    #                 M[i] = {}
+    #             M[i][j] = initialLLRs[i]
+        
+    #     #E => Check to bit messages
+    #     E = {j: {} for j in range(int(self.m))}
+
+    #     # # Initialize check-to-bit messages
+        
+        
+    #     bitNodes = initialLLRs.copy()
+    #     # hardDecisions = [0]*len(bitNodes)
+    #     # for i in range(len(bitNodes)):
+    #     #         if bitNodes[i] > 0:
+    #     #             hardDecisions[i] = 0
+    #     #         else: hardDecisions[i] = 1
+    
+    #     BER = 0
+    #     errors = 0
+    #     numIterations = 0
+    #     while numIterations < 50:
+    #         self.numIterations = numIterations
+    #         errors = cp.sum(cp.array(self.originalEncoded) != cp.array(hardDecisions))
+    #         print(f"Worker: {os.getpid()}, Decoding Iteration {numIterations}: BER {errors/len(bitNodes)}")
+    #         #Test the hard decision on current soft values
+    #         if self.isValidCodeword(hardDecisions):
+    #             errors = cp.sum(cp.array(self.originalEncoded) != cp.array(hardDecisions))
+    #             print(f"Sum Product Decoding done after {numIterations} Iterations")
+    #             self.messageDecoded = hardDecisions
+    #             return errors/len(bitNodes)
+
+    #         messagesReceivedByBits = cp.zeros(len(bitNodes)) 
+
+    #         for j in range(int(self.m)):  
+    #             Ej = cp.where(self.H[j] == 1)[0].get().tolist()  # All bits connected to check j
+
+    #             for target in Ej:
+    #                 # Use all other bits except the target
+    #                 others = [k for k in Ej if k != target]
+
+    #                 # Get valid messages bits to this check
+    #                 incoming = [M[k][j] for k in others]
+    #                 incoming = cp.asarray(incoming)
+
+    #                 # tanhValues = np.array([np.tanh(M/2) for M in incoming])
+    #                 tanhValues = cp.tanh(cp.clip(cp.array(incoming)/2, -20, 20))
+
+    #                 tanhProd = cp.prod(tanhValues)
+    #                 tanhProd = cp.clip(tanhProd, -0.999999999999, 0.999999999999)
+
+    #                 E[j][target] =  2*cp.arctanh(tanhProd)
+    #                 # E[j][target] = np.clip(2*np.arctanh(tanhProd), -50, 50)
+
+        
+    #             # bitNodes[i] = numpy.clip(bitNodes[i], -100.0, 100.0)
+            
+    #         #Set new variable node messages, excluding each check node's own contribution
+    #         if numIterations < 18:
+    #             damping = 0.0
+    #         elif numIterations < 20:
+    #             damping = 0.2
+    #         elif numIterations < 40:
+    #             damping = 0.3
+    #         else:
+    #             damping = 0.6
+    #         damping = 0
+    #         # damping = 0.3
+    #         for i in range(self.n):
+    #             for j in cp.where(self.H[:, i] == 1)[0].get().tolist():
+    #                 otherChecks = [k for k in cp.where(self.H[:, i] == 1)[0] if k != j]
+    #                 newMsg = initialLLRs[i] + sum(E[k][i] for k in otherChecks)
+    #                 M[i][j] = damping * M[i][j] + (1 - damping) * newMsg
+    #                 # M[i][j] =  (initialLLRs[i] + sum(E[k][i] for k in otherChecks))
+            
+    #         #Calculate LLR total for the variable node
+    #         for i in range(len(bitNodes)):
+    #             incoming_checks = cp.where(self.H[:, i] == 1)[0].get().tolist()
+    #             bitNodes[i] = initialLLRs[i] + sum(E[j][i] for j in incoming_checks)
+                
+    
+    #         bitNodes = cp.clip(bitNodes, -30, 30)
+         
+    #         for i in range(len(bitNodes)):
+    #             if bitNodes[i] > 0:
+    #                 hardDecisions[i] = 0
+    #             else: hardDecisions[i] = 1
+     
+    #         numIterations += 1
+        
+        
+    #     errors = cp.sum(cp.array(self.originalEncoded) != cp.array(hardDecisions))
+    #     BER = errors/len(bitNodes) 
+    #     print(f"Decoding Failed, Best Guess - BER: {BER}, SNR {self.SNR}, Eb/No {self.bitEnergyRatio}")
+
+    #     self.messageDecoded = hardDecisions
+    #     self.BER = BER
+    
+    #     return FRAME_ERROR
+
+    # def virtualSumProduct(self, codeword, hardDecisionsIn, useInterleave):
+    #     # ---- Normalize to CuPy at the boundary ----
+    #     codeword      = cp.asarray(codeword)
+    #     hardDecisions = cp.asarray(hardDecisionsIn)
+
+    #     # Ensure H on GPU once (guarded); also keep a CPU view for index scans
+    #     if not isinstance(self.H, cp.ndarray):
+    #         self.H = cp.asarray(self.H, dtype=cp.int8)
+    #     H_cpu = np.asarray(cp.asnumpy(self.H))  # CPU-only, for np.where -> Python ints
+
+    #     numPuncturedBits = 384
+
+    #     # ---- Build initial LLRs using existing CPU helpers; then move once to GPU ----
+    #     codeword_cpu = np.asarray(cp.asnumpy(codeword))
+    #     initialLLRs_list = []
+    #     if useInterleave:
+    #         for i, symbol in enumerate(codeword_cpu):
+    #             if i < -40:
+    #                 initialLLRs_list.extend([1e-9, 1e-9])
+    #             else:
+    #                 complex_y = complex(*symbol)
+    #                 initialLLRs_list.extend(computeLLRS(complex_y, dists))
+    #         initialLLRs_list = deinterleave(initialLLRs_list)
+    #         initialLLRs_list[:numPuncturedBits] = [1e-9] * numPuncturedBits
+    #     else:
+    #         for i, symbol in enumerate(codeword_cpu):
+    #             if i < numPuncturedBits:
+    #                 initialLLRs_list.extend([1e-9, 1e-9])
+    #             else:
+    #                 complex_y = complex(*symbol)
+    #                 initialLLRs_list.extend(computeLLRS(complex_y, dists))
+
+    #     initialLLRs = cp.asarray(initialLLRs_list, dtype=cp.float32)
+    #     bitNodes = initialLLRs.copy()
+
+    #     # ---- M: bit->check messages (dicts; keys must be Python ints) ----
+    #     M = {}
+    #     for j in range(int(self.m)):
+    #         cols = np.where(H_cpu[j] == 1)[0].tolist()  # Python ints
+    #         for ii in cols:
+    #             if ii not in M:
+    #                 M[ii] = {}
+    #             M[ii][j] = initialLLRs[ii]  # CuPy scalar as value is fine
+
+    #     # ---- E: check->bit messages (dict of dicts) ----
+    #     E = {j: {} for j in range(int(self.m))}
+
+    #     # Cache CuPy view of the original codeword for fast comparisons
+    #     orig_gpu = cp.asarray(self.originalEncoded)
+
+    #     numIterations = 0
+    #     while numIterations < 50:
+    #         self.numIterations = numIterations
+
+    #         # Keep both operands CuPy
+    #         errors = cp.sum(orig_gpu != hardDecisions)
+    #         print(f"Worker: {os.getpid()}, Decoding Iteration {numIterations}: BER {errors/len(bitNodes)}")
+    #         # If your checker uses NumPy, feed it NumPy
+    #         if self.isValidCodeword(hardDecisions):
+    #             errors = cp.sum(orig_gpu != hardDecisions)
+    #             print(f"Sum Product Decoding done after {numIterations} Iterations")
+    #             self.messageDecoded = hardDecisions
+    #             return float(errors) / len(bitNodes)
+
+    #         # ---- CHECK NODE UPDATE (E) ----
+    #         for j in range(int(self.m)):
+    #             Ej = np.where(H_cpu[j] == 1)[0].tolist()     # Python ints
+    #             for target in Ej:
+    #                 others = [k for k in Ej if k != target]  # pure Python ints
+    #                 if others:
+    #                     incoming_vec = cp.asarray([M[k][j] for k in others], dtype=cp.float32)
+    #                     tanhValues = cp.tanh(cp.clip(incoming_vec / 2, -20, 20))
+    #                     tanhProd = cp.clip(cp.prod(tanhValues), -0.999999999999, 0.999999999999)
+    #                     E[j][target] = 2 * cp.arctanh(tanhProd)
+    #                 else:
+    #                     E[j][target] = cp.float32(0.0)
+
+    #         # Damping (kept identical)
+    #         if numIterations < 18:
+    #             damping = 0.0
+    #         elif numIterations < 20:
+    #             damping = 0.2
+    #         elif numIterations < 40:
+    #             damping = 0.3
+    #         else:
+    #             damping = 0.6
+    #         damping = 0.0
+
+    #         # ---- VARIABLE NODE UPDATE (M) ----
+    #         for i in range(self.n):
+    #             cols = np.where(H_cpu[:, i] == 1)[0].tolist()
+    #             for j in cols:
+    #                 otherChecks = [k for k in cols if k != j]
+    #                 if otherChecks:
+    #                     e_vals = cp.asarray([E[k][i] for k in otherChecks], dtype=cp.float32)
+    #                     e_sum = cp.sum(e_vals)         # NOT Python sum(...)
+    #                 else:
+    #                     e_sum = cp.float32(0.0)
+    #                 newMsg = initialLLRs[i] + e_sum
+    #                 M[i][j] = damping * M[i][j] + (1 - damping) * newMsg
+
+    #         # ---- AGGREGATE variable LLRs ----
+    #         for i in range(len(bitNodes)):
+    #             incoming = np.where(H_cpu[:, i] == 1)[0].tolist()
+    #             if incoming:
+    #                 e_vals = cp.asarray([E[j][i] for j in incoming], dtype=cp.float32)
+    #                 bitNodes[i] = initialLLRs[i] + cp.sum(e_vals)  # NOT Python sum(...)
+    #             else:
+    #                 bitNodes[i] = initialLLRs[i]
+
+    #         bitNodes = cp.clip(bitNodes, -30, 30)
+
+    #         # ---- HARD decisions (avoid 0-D CuPy truthiness) ----
+    #         for i in range(len(bitNodes)):
+    #             hardDecisions[i] = 0 if (float(bitNodes[i]) > 0.0) else 1
+
+    #         numIterations += 1
+
+    #     errors = cp.sum(orig_gpu != hardDecisions)
+    #     BER = float(errors) / len(bitNodes)
+    #     print(f"Decoding Failed, Best Guess - BER: {BER}, SNR {self.SNR}, Eb/No {self.bitEnergyRatio}")
+
+    #     self.messageDecoded = hardDecisions
+    #     self.BER = BER
+    #     return FRAME_ERROR
 
     def addNoiseBPSK(self, SNR_DB, encoded, plot=False):
         power = sum([a**2 for a in encoded]) / len(encoded) 
@@ -682,7 +1079,7 @@ def readMatrix(filePath):
 
     # Convert to NumPy array
     H = np.array(rows, dtype=int)
-    print(H.shape)
+    # print(H.shape)
     # Generate generator matrix G
     G = pyldpc.coding_matrix(H, False)
 
@@ -722,9 +1119,9 @@ def test(snr):
 # """"RATE 3/4"""
 
 # test1 = LDPCEncoder(4,8, 648, readDataMatrix=True)
-test1 = LDPCEncoder(4,5,648, readDataMatrix=True)
-# test1 = LDPCEncoder(2,4, 64, readDataMatrix=False)
-message1 = np.random.randint(0, 2, size=test1.n * 6).tolist()
+# test1 = LDPCEncoder(4,5,648, readDataMatrix=True)
+# # test1 = LDPCEncoder(2,4, 64, readDataMatrix=False)
+# message1 = np.random.randint(0, 2, size=test1.n * 6).tolist()
 # path = "Matrices/nonBinaryMatrix.txt"
 # H_idx, H_ele, m, n = test1.load_nb_ldpc_matrix(path)
 # decoded, nerr = test1.run_nb_ldpc_decoder(message1, H_idx, H_ele, m,n )
