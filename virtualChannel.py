@@ -14,7 +14,7 @@ import cupy as cp
 from cupyx.profiler import benchmark
 from multiprocessing import Pool
 cp.random.seed(10) #600 and 10
-
+np.random.seed(10)
 _workerCODEC = None #each worker gets their own CODEC
 
 GOOD = 1
@@ -23,9 +23,9 @@ DISTRIBUTIONS = dists
 
 virtualChannel = bpsk.LDPCEncoder(4,5,2000, readDataMatrix=True, matrixPath="Matrices/5GThirdRate.mat")
 
-message1 = np.random.randint(0, 2, size=400).tolist()  
-virtualChannel.encode(message1, 100)
-encoded = virtualChannel.originalEncoded
+# message1 = np.random.randint(0, 2, size=400).tolist()  
+# virtualChannel.encode(message1, 100)
+# encoded = virtualChannel.originalEncoded
 
 INTERLEAVE_DEPTH = 13
 
@@ -301,12 +301,13 @@ def performanceBenchmark():
     print(f"Average Decoding Time: {averageTime}, Average Decoding: {averageDecodeIterations} iterations")
     print(f"Total Time: {totalTime}")
 
-# performanceBenchmark()
+performanceBenchmark()
 # input(f"Done")
+
+#This uses fixed 5g Third rate codeword
 def plotBurstError(minSum=True, sumProd=False, bitFlip=False, readMatrixFile=False):
     print("Begin frame error plot")
     snrRange = np.array([2.6])
-
     snrRange = np.arange(1)
     BEROut = []
    
@@ -339,13 +340,14 @@ def plotBurstError(minSum=True, sumProd=False, bitFlip=False, readMatrixFile=Fal
                 encoded = virtualChannel.originalEncoded
                 print(f"\033[32m Information Length: {virtualChannel.G.shape[1]}, Total Encoded length: {len(encoded)}, Rate: {virtualChannel.G.shape[1]/len(encoded)}\033[0m")
                 interleavedEncoded = interleave(encoded)
-                transmission = burstTransmission(interleavedEncoded, DISTRIBUTIONS, 200, harsh=True)
+                transmission = burstTransmission(interleavedEncoded, DISTRIBUTIONS, 200, harsh=False)
                 assert (np.array_equal(virtualChannel.originalEncoded, deinterleave(interleavedEncoded))), "INTERLEAVE FAILED"
 
                 print(f"Begin Decoding...")
                 hardDecisions = mapConstellationsToBits(transmission)
                 # compareOriginalToHardDecisions(virtualChannel.originalEncoded, deinterleave(hardDecisions.copy()),transmission)
-                BER = virtualChannel.virtualSumProduct(transmission, deinterleave(hardDecisions), useInterleave)
+                BER = virtualChannel.virtualSumProduct(cp.array(transmission), cp.array(deinterleave(hardDecisions)), useInterleave)
+                #BER = virtualChannel.virtualSumProduct(transmission, hardDecisions, useInterleave)
             else:
                 os.system("cls")
                 message1 = np.random.randint(0, 2, size=virtualChannel.G.shape[1]).tolist()  
@@ -363,7 +365,7 @@ def plotBurstError(minSum=True, sumProd=False, bitFlip=False, readMatrixFile=Fal
             #Error locations: 
             decoderOutput = virtualChannel.messageDecoded
             assert(len(decoderOutput) == len(encoded), "Decoding length mismatch")
-            frameBitErrors =  np.sum(np.array(decoderOutput) != np.array(encoded))
+            frameBitErrors =  cp.sum(cp.array(decoderOutput) != cp.array(encoded))
             totalFrameBitErrors += frameBitErrors
             for i, bit in enumerate(decoderOutput):
                 if bit != encoded[i]:
@@ -463,6 +465,8 @@ def singleWorker(args):
         hardDecisions = mapConstellationsToBits(transmission)
         # compareOriginalToHardDecisions(virtualChannel.originalEncoded, deinterleave(hardDecisions.copy()),transmission)
         BER = VC.virtualSumProduct(cp.array(transmission), cp.array(deinterleave(hardDecisions)), useInterleave)
+        # BER = VC.virtualSumProduct(transmission, deinterleave(hardDecisions), useInterleave)
+        print(VC.originalEncoded[:80])
     else:
         os.system("cls")
         message = np.random.randint(0, 2, size=VC.G.shape[1]).tolist()  
@@ -472,9 +476,11 @@ def singleWorker(args):
         hardDecisions = cp.array(mapConstellationsToBits(transmission))
         # compareOriginalToHardDecisions(encoded, hardDecisions,transmission)
         BER = VC.virtualSumProduct(transmission, hardDecisions, useInterleave)
+    if BER == FRAME_ERROR: 
+        return 1
     return float(BER)
 
-def batchMonteCarlo(maxErrors=500, poolSize=4, useInterleave=True):
+def batchMonteCarlo(maxErrors=500, poolSize=2, useInterleave=True):
     frameErrors = 0
     iterations = 0
     BERS = []
@@ -496,11 +502,11 @@ def batchMonteCarlo(maxErrors=500, poolSize=4, useInterleave=True):
     successfulBER = BERS/iterations #check BER even when parity checks pass
     return FER, successfulBER
 # plotFrameError()
-if __name__ == "__main__":
-    # init_worker()
-    # print(singleWorker(True))
-    # batchMonteCarlo()
-    print(f"Starting")
+# if __name__ == "__main__":
+#     # init_worker()
+#     # print(singleWorker(True))
+#     batchMonteCarlo()
+#     print(f"Starting")
 # def testGuard():
 #     frameErrors = 0
 #     guardVals = [0,100,200,300,400,500]
