@@ -575,7 +575,7 @@ class LDPCEncoder():
             L_v2c = cp.clip(L_v2c_new, -40.0, 40.0)  # aligns with tanh(clip(M/2, ±20))
 
             # ===================== Hard decisions & early stop =====================
-            hard = (L_post < 0).astype(cp.int8)
+            hard = (L_post <= 0).astype(cp.int8)
             self.messageDecoded = hard  # maintain side-effect parity with CPU
 
             # Syndrome (deterministic)
@@ -586,7 +586,8 @@ class LDPCEncoder():
                 errors = int(cp.sum(orig_bits != hard).get())
                 ber = errors / N
                 self.BER = ber
-                input(f"done")
+                # input(f"done")
+                print(f"Syndrome passed - BER: {float(cp.sum(orig_bits[:int(N/3)] != hard[:int(N/3)]).get()) / N}")
                 return ber
 
             # (Optional debug) — avoid per-iter syncs unless needed
@@ -595,7 +596,7 @@ class LDPCEncoder():
             print(f"[GPU SPA] it={it} BER={ber_dbg:.4g}, SNR {self.SNR}, Eb/No {self.bitEnergyRatio}")
 
         # --- fail path (no convergence) ---
-        hard = (L_post < 0).astype(cp.int8)
+        hard = (L_post <= 0).astype(cp.int8)
         errors = int(cp.sum(orig_bits != hard).get())
         ber = errors / N
         print(f"Decoding Failed, Best Guess - BER: {ber}, SNR {self.SNR}, Eb/No {self.bitEnergyRatio}")

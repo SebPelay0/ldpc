@@ -21,7 +21,7 @@ GOOD = 1
 BURST = -1
 DISTRIBUTIONS = dists
 
-virtualChannel = bpsk.LDPCEncoder(4,5,2000, readDataMatrix=True, matrixPath="Matrices/5GThirdRate.mat")
+virtualChannel = bpsk.LDPCEncoder(4,5,2000, readDataMatrix=True, matrixPath="Matrices/BG2.mat")
 
 # message1 = np.random.randint(0, 2, size=400).tolist()  
 # virtualChannel.encode(message1, 100)
@@ -280,7 +280,7 @@ def performanceBenchmark():
         encoded = virtualChannel.originalEncoded
         print(f"\033[32m Information Length: {virtualChannel.G.shape[1]}, Total Encoded length: {len(encoded)}, Rate: {virtualChannel.G.shape[1]/len(encoded)}\033[0m")
         interleavedEncoded = interleave(encoded)
-        transmission = burstTransmission(interleavedEncoded, DISTRIBUTIONS, 200, harsh=True)
+        transmission = burstTransmission(interleavedEncoded, DISTRIBUTIONS, 200, harsh=False)
         assert (np.array_equal(virtualChannel.originalEncoded, deinterleave(interleavedEncoded))), "INTERLEAVE FAILED"
 
         print(f"Begin Decoding...")
@@ -295,13 +295,44 @@ def performanceBenchmark():
         totalTime += (end - start)
         totalIt += virtualChannel.numIterations
         i+=1
-
+    totalFrameBitErrors = 0
+    averageErrorsInFrame = 0
     averageTime = totalTime/numIterations
     averageDecodeIterations = totalIt/numIterations
+    decoderOutput = virtualChannel.messageDecoded
+    assert(len(decoderOutput) == len(encoded), "Decoding length mismatch")
+    frameBitErrors =  cp.sum(cp.array(decoderOutput) != cp.array(encoded))
+    totalFrameBitErrors += frameBitErrors
+    codeLength = 2080  #19968
+    accumulateErrors = np.zeros(codeLength)
+    for i, bit in enumerate(decoderOutput):
+        if bit != encoded[i]:
+            accumulateErrors[i] +=1
+
+    nz = np.flatnonzero(accumulateErrors)
+    if nz.size == 0:
+        print("No errors recorded.")
+    else:
+        counts = accumulateErrors[nz]
+        segs = [((i, 0), (i, c)) for i, c in zip(nz, counts)]
+
+        fig, ax = plt.subplots(figsize=(18, 3))
+        lc = LineCollection(segs, linewidths=0.8)
+        ax.add_collection(lc)
+        ax.scatter(nz, counts, s=6)  # optional dots at the tips
+        ax.set_xlim(0, accumulateErrors.size)
+        ax.set_ylim(0, counts.max() * 1.05)
+        ax.set_xlabel("Bit index")
+        ax.set_ylabel("Error count")
+        ax.set_title(f"Decoding Error Distribution")
+        ax.text(0.99,0.98, f"Average Num Errors: {averageErrorsInFrame}", transform=ax.transAxes, ha="right", va="top", bbox=dict(boxstyle="round", facecolor="white"), zorder=10)
+        fig.tight_layout()
+        plt.savefig("titlePlot.png")
+        plt.show() 
     print(f"Average Decoding Time: {averageTime}, Average Decoding: {averageDecodeIterations} iterations")
     print(f"Total Time: {totalTime}")
 
-performanceBenchmark()
+# performanceBenchmark()
 # input(f"Done")
 
 #This uses fixed 5g Third rate codeword
@@ -314,7 +345,7 @@ def plotBurstError(minSum=True, sumProd=False, bitFlip=False, readMatrixFile=Fal
     totalFrameErrors = []
     sumProdBEROut = []
     bitFlipBEROut = []
-    maxErrors = 500
+    maxErrors = 200
     for snr in snrRange:
         avgBER = []
         avgSumProdBER = 0
@@ -340,6 +371,7 @@ def plotBurstError(minSum=True, sumProd=False, bitFlip=False, readMatrixFile=Fal
                 encoded = virtualChannel.originalEncoded
                 print(f"\033[32m Information Length: {virtualChannel.G.shape[1]}, Total Encoded length: {len(encoded)}, Rate: {virtualChannel.G.shape[1]/len(encoded)}\033[0m")
                 interleavedEncoded = interleave(encoded)
+                print(f"Harsh={False}")
                 transmission = burstTransmission(interleavedEncoded, DISTRIBUTIONS, 200, harsh=False)
                 assert (np.array_equal(virtualChannel.originalEncoded, deinterleave(interleavedEncoded))), "INTERLEAVE FAILED"
 
@@ -363,7 +395,8 @@ def plotBurstError(minSum=True, sumProd=False, bitFlip=False, readMatrixFile=Fal
                 BER = virtualChannel.virtualSumProduct(transmission, hardDecisions, useInterleave)
 
             #Error locations: 
-            decoderOutput = virtualChannel.messageDecoded
+            decoderOutput = cp.array(virtualChannel.messageDecoded)
+            # input(f"here")
             assert(len(decoderOutput) == len(encoded), "Decoding length mismatch")
             frameBitErrors =  cp.sum(cp.array(decoderOutput) != cp.array(encoded))
             totalFrameBitErrors += frameBitErrors
@@ -394,22 +427,6 @@ def plotBurstError(minSum=True, sumProd=False, bitFlip=False, readMatrixFile=Fal
 
         # test1.write("results2.txt", snr, avgBER/n, avgSumProdBER/5.5,avgBitFlipBER/n )
     print(f"SNRS: {snrRange}")
-    print(f"Total frame errors: {totalFrameErrors}, Num Iterations: {iterations}")
-    filePath = "newErrors.txt"
-    with open("C:/Users/lab-user/OneDrive - UNSW/testing/ldpc/Matrices/FER_RESULTS.txt", "a") as f:
-        f.write(f"FER: {totalFrameErrors}, Date: {datetime.datetime.now()}, Rate: {virtualChannel.G.shape[1]/len(encoded)}, Encoded Length: {len(encoded)}\n")
-    with open(filePath, "a") as file:
-            file.write(f"FER: {totalFrameErrors}, Date: {datetime.datetime.now()}\n")
-    plt.figure(figsize=(8, 5))
-    plt.semilogy(snrRange, totalFrameErrors, marker='o', linestyle='-')  
-    plt.xlabel("SNR (dB)")
-   
-    plt.ylabel("Frame Error Rate")
-    plt.title("Sum Product 5G LDPC Frame Error vs. SNR at 1/5 Data Rate, n= 2000, z = 80")
-    plt.grid(True, which="both", linestyle="--")
-   
-    plt.show()
-
     nz = np.flatnonzero(accumulateErrors)
     if nz.size == 0:
         print("No errors recorded.")
@@ -428,8 +445,25 @@ def plotBurstError(minSum=True, sumProd=False, bitFlip=False, readMatrixFile=Fal
         ax.set_title(f"Decoding Error Distribution")
         ax.text(0.99,0.98, f"Average Num Errors: {averageErrorsInFrame}", transform=ax.transAxes, ha="right", va="top", bbox=dict(boxstyle="round", facecolor="white"), zorder=10)
         fig.tight_layout()
-        plt.savefig("C:/Users/lab-user/OneDrive - UNSW/testing/ldpc/Matrices/titlePlot.png")
+        plt.savefig("C:/Users/Sebastian Pelayo/OneDrive - UNSW/errorPlotGPU.png")
         plt.show() 
+    print(f"Total frame errors: {totalFrameErrors}, Num Iterations: {iterations}")
+    filePath = "newErrors.txt"
+    with open("FER_RESULTS.txt", "a") as f:
+        f.write(f"FER: {totalFrameErrors}, Date: {datetime.datetime.now()}, Rate: {virtualChannel.G.shape[1]/len(encoded)}, Encoded Length: {len(encoded)}\n")
+    with open(filePath, "a") as file:
+            file.write(f"FER: {totalFrameErrors}, Date: {datetime.datetime.now()}\n")
+    plt.figure(figsize=(8, 5))
+    plt.semilogy(snrRange, totalFrameErrors, marker='o', linestyle='-')  
+    plt.xlabel("SNR (dB)")
+   
+    plt.ylabel("Frame Error Rate")
+    plt.title("Sum Product 5G LDPC Frame Error vs. SNR at 1/5 Data Rate, n= 2000, z = 80")
+    plt.grid(True, which="both", linestyle="--")
+   
+    plt.show()
+
+    
 
 plotBurstError()
 
